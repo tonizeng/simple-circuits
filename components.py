@@ -4,7 +4,7 @@ COMPONENT_NAMES = {
     "voltage_source": "DC Source", "resistor": "Resistor", "wire": "Wire",
     "led": "LED", "diode": "Diode", "switch": "Switch", "button": "Button",
     "photodiode": "Photodiode", "capacitor": "Capacitor", "inductor": "Inductor",
-    "potentiometer": "Potentiometer", "motor": "Motor",
+    "potentiometer": "Potentiometer",
 }
 
 # Required numeric fields and ranges: (minimum, maximum, minimum_is_exclusive).
@@ -18,9 +18,6 @@ NUMERIC_PARAMETERS = {
     "capacitor": {"capacitance_f": (0, None, True)},
     "inductor": {"inductance_h": (0, None, True)},
     "potentiometer": {"resistance_ohm": (0, None, True), "wiper_position": (0, 1, False)},
-    "motor": {"armature_resistance_ohm": (0, None, True),
-              "armature_inductance_h": (0, None, True),
-              "back_emf_constant_v_s_per_rad": (0, None, False)},
 }
 
 BOOLEAN_PARAMETERS = {"switch": ("closed",), "button": ("normally_closed", "pressed")}
@@ -64,6 +61,4 @@ def nominal_label(component):
         return f"{cid}: {'Closed' if contact_closed(component) else 'Open'}"
     if kind == "potentiometer":
         return f"{cid} = {engineering(p['resistance_ohm'], 'Ω')}\nWiper: {p['wiper_position']:.0%}"
-    if kind == "motor":
-        return f"{cid}: DC Motor\nRa = {engineering(p['armature_resistance_ohm'], 'Ω')}"
     return f"{cid}: Ideal wire"

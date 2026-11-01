@@ -153,7 +153,7 @@ storage are planned application responsibilities.
 ## Current implementation
 
 `topology.py` implements JSON/dict parsing and validation into electrical
-component, terminal, net, and circuit objects. All 12 types listed below are
+component, terminal, net, and circuit objects. All 11 types listed below are
 supported for drawing, using the example parameter fields. `components.py`
 shares names, numeric/boolean validation rules, terminal definitions, and labels.
 The current
@@ -172,7 +172,7 @@ labels. Three-component series loops with one voltage source are laid out as a
 rectangle: source on the left, the next component on top, and the final component
 on the right, with a bottom return wire. Placement follows connectivity, retaining
 terminal polarity. `layout.py` adds connectivity-based rectangular series/parallel
-layouts for longer chains, parallel loads, motor/flyback branches, and unloaded
+layouts for longer chains, parallel loads, and unloaded
 potentiometers. Every bundled example now has a rectangular layout. General
 non-series/parallel graphs or loaded potentiometer wipers still use net lanes.
 The UI scales oversized drawings to fit on load. No electrical solving or node
@@ -188,8 +188,7 @@ name. Invalid input shows an error and preserves the previous circuit. Startup
 remains blank until data is loaded.
 
 Controller communication, raw-wire merging, and saving from the UI
-have not yet been implemented. DC MNA is now integrated for examples 1–5; other
-component types remain renderable without simulation.
+have not yet been implemented. DC steady-state MNA is integrated for all 11 examples; transient charging is not yet simulated.
 
 Basic storage now exists in `database.py`: SQLite stores only the circuit name
 and JSON document. Names are unique; saving an existing name replaces its JSON.
@@ -201,10 +200,10 @@ opens the generated link for supported circuits.
 Storage is independent of component rendering support.
 
 The intended component scope is DC sources, resistors, wires, LEDs, diodes,
-switches, buttons, photodiodes, capacitors, inductors, potentiometers, and motors.
-`examples/README.md` documents 12 educational circuits and the component input
+switches, buttons, photodiodes, capacitors, inductors, and potentiometers.
+`examples/README.md` documents 11 educational circuits and the component input
 parameters. Every example can be parsed, rendered, and stored; DC
-simulation is available for examples 1–5. Switch/button symbols start from JSON
+steady-state simulation is available for all 11 examples. Switch/button symbols start from JSON
 states and are read-only in the UI, mirroring the physical circuit.
 New examples use `LED1` for LEDs and `L1` for inductors to avoid prefix conflicts;
 the original example retains its older LED ID. Potentiometers introduce terminal
@@ -222,11 +221,9 @@ LED nominal labels use `L1: Vf = 2 V`. Result boxes are fed by `solve_dc()`.
 
 ## Initial MNA implementation
 
-Initial scope is DC operating-point behavior for examples 1–5: resistors,
-DC voltage sources, LEDs, maintained switches, and momentary buttons. Example
-11 (motor/flyback) is restored for storage/rendering, outside this solver scope.
-No transient, capacitor, inductor, motor, or photodiode solver is planned for
-this first step. Unsupported types must produce an explicit unsupported-result
+The original implementation covered examples 1–5: resistors,
+DC voltage sources, LEDs, maintained switches, and momentary buttons. DC models for the remaining components have since been added below; transient
+charging and current-ramp behavior are still outside scope. Unsupported types must produce an explicit unsupported-result
 status, not be silently omitted.
 
 Keep topology objects and Qt symbols separate from solver device classes.
@@ -289,9 +286,9 @@ visual only. Falstad export uses the latest received contact state.
 NumPy/SciPy are declared in requirements.txt. No Falstad solver code is copied.
 
 Current presentation: result boxes display `abs(current_a)` while the solver
-retains signed currents. Purple arrows near component leads indicate actual
+retains signed currents. Blue arrows (#2878b5) near component leads indicate actual
 conventional current direction (1→2 for positive, 2→1 for negative). They rotate
-with symbols, highlight green with the component, and are hidden for unknown or
+with symbols, darken to #1b5a88 on hover, and are hidden for unknown or
 effectively zero current (absolute value <= 1e-12 A). Voltage remains V1 − V2.
 
 ## Optional exponential LED model
@@ -315,6 +312,42 @@ The fixed model remains accessible through `solve_dc(circuit, led_model="fixed")
 No physical controls are introduced; topology remains authoritative.
 
 [Reference LED calibration](https://github.com/sharpie7/circuitjs1/blob/master/src/com/lushprojects/circuitjs1/client/DiodeModel.java)
+
+## DC models for examples 6–12
+
+The default fixed-drop solver supports all component types in the bundled examples:
+
+| type | DC model |
+| --- | --- |
+| diode | constant forward drop when conducting, zero reverse current |
+| wire | ideal zero-voltage constraint with a current unknown |
+| capacitor | open circuit (I = 0) after settling |
+| inductor | ideal zero-voltage constraint after settling |
+| potentiometer | R13 = total R × position; R32 = total R × (1 − position) |
+| photodiode | photocurrent source from cathode to anode, parallel forward diode |
+
+Potentiometer positions 0 and 1 use an ideal contact for the zero-length track
+segment, without division by zero. `ComponentResult.terminal_currents_a` provides
+signed currents entering all three terminals. The result box's I is terminal-1
+current; its V is the full track voltage, not wiper voltage. Wiper voltage is
+available in `node_voltages`. Wire/inductor loops may have ambiguous individual
+currents; those remain unavailable instead of being assigned arbitrarily.
+
+Photodiode `photocurrent_a` is positive from cathode to anode, hence a negative
+terminal-1-to-2 current when reverse biased. Its forward junction uses an optional
+positive `forward_voltage_v`, default 0.7 V (a simplified software assumption).
+No capacitance, dark leakage, or reverse breakdown is modeled.
+
+Capacitor/inductor initial conditions are retained in JSON but do not affect
+DC equilibrium. Status messages identify that transient behavior is not simulated.
+
+Optional exponential LED mode currently rejects circuits also containing ordinary
+diodes or photodiodes; use the default fixed mode for those combinations. Falstad
+export remains limited to examples 1–5; this addition does not change export scope.
+No schematic interaction can change physical component states.
+
+Model references:
+- [Photodiode equivalent circuit](https://wiki.analog.com/university/courses/electronics/text/light-sensors-photodiodes)
 
 ## Falstad export
 
@@ -360,9 +393,6 @@ connections must be reconstructed with shared post coordinates and wires.
   use switch behavior; the potentiometer wiper's computed post needs adapting.
 - The optional exponential LED model matches the explicit-Vf exports. Named Falstad LED
   models can differ and are not automatically matched by a single Vf input.
-- CircuitJS has a DC motor element, but it expects additional mechanical
-  parameters (including inertia and friction). Our current JSON is insufficient
-  for a fully specified motor export without documented defaults or new fields.
 - Native photodiode support has not been confirmed in the inspected source.
   A diode plus a parallel photocurrent source is a possible approximation;
   this must be explicit to the user, not a silent substitution.
@@ -376,4 +406,10 @@ Sources inspected:
 - [Voltage source format](https://github.com/sharpie7/circuitjs1/blob/master/src/com/lushprojects/circuitjs1/client/VoltageElm.java)
 - [Diode models](https://github.com/sharpie7/circuitjs1/blob/master/src/com/lushprojects/circuitjs1/client/DiodeElm.java)
 - [Potentiometer geometry and format](https://github.com/sharpie7/circuitjs1/blob/master/src/com/lushprojects/circuitjs1/client/PotElm.java)
-- [DC motor parameters](https://github.com/sharpie7/circuitjs1/blob/master/src/com/lushprojects/circuitjs1/client/DCMotorElm.java)
+
+## Button example initial state
+
+Example 5 starts with `normally_closed: false` and `pressed: true`: the normally
+open button is held down, so its contact is closed. This changes sample input,
+not UI controls or hardware-state interpretation. Received topology remains
+authoritative. The matching bundled database record and Falstad text are updated.

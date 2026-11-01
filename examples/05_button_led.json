@@ -16,7 +16,7 @@
       "type": "button",
       "parameters": {
         "normally_closed": false,
-        "pressed": false
+        "pressed": true
       }
     },
     {

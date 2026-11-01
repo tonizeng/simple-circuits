@@ -24,6 +24,10 @@ class Device:
     def current(self, system):
         return system.zero()
 
+    @property
+    def current_offset(self):
+        return 0.0
+
     def inequalities(self, system):
         return []
 
@@ -88,3 +92,77 @@ class LED(Device):
 
 DEVICE_TYPES = {"resistor": Resistor, "voltage_source": VoltageSource,
                 "switch": Switch, "button": Button, "led": LED}
+
+
+class Diode(LED):
+    """Ideal blocking / constant forward voltage, like the classroom LED."""
+
+
+class Wire(VoltageSource):
+    def stamp(self, system):
+        system.voltage_constraint(self.id, self.a, self.b, 0)
+
+
+class Capacitor(Device):
+    """DC equilibrium: zero current. Initial voltage is a transient condition."""
+
+
+class Inductor(Wire):
+    """DC equilibrium: zero voltage. Initial current is a transient condition."""
+
+
+class Photodiode(Diode):
+    """Constant photocurrent from cathode to anode, plus a forward diode."""
+    @property
+    def current_offset(self):
+        return -self.component.parameters["photocurrent_a"]
+
+    def stamp(self, system):
+        system.current_source(self.a, self.b, self.current_offset)
+        if self.active:
+            system.voltage_constraint(self.id, self.a, self.b,
+                                      self.component.parameters.get("forward_voltage_v", .7))
+
+    def inequalities(self, system):
+        if self.active:
+            return [(-system.branch_current(self.id), 0)]
+        return [(self.voltage(system), self.component.parameters.get("forward_voltage_v", .7))]
+
+
+class Potentiometer(Device):
+    def __init__(self, component, nodes, active=False):
+        super().__init__(component, nodes, active)
+        self.wiper = nodes[(self.id, "3")]
+        self.position = component.parameters["wiper_position"]
+        self.resistance = component.parameters["resistance_ohm"]
+
+    @property
+    def needs_branch_current(self):
+        return self.position in (0, 1)
+
+    def stamp(self, system):
+        if self.position == 0:
+            system.voltage_constraint(self.id, self.a, self.wiper, 0)
+        else:
+            system.conductance(self.a, self.wiper, 1 / (self.resistance * self.position))
+        if self.position == 1:
+            system.voltage_constraint(self.id, self.wiper, self.b, 0)
+        else:
+            system.conductance(self.wiper, self.b, 1 / (self.resistance * (1 - self.position)))
+
+    def current(self, system):
+        # Displayed I is current entering terminal 1, NOT necessarily wiper current.
+        if self.position == 0:
+            return system.branch_current(self.id)
+        return system.difference(self.a, self.wiper) / (self.resistance * self.position)
+
+    def terminal_currents(self, system):
+        first = self.current(system)
+        second = (-system.branch_current(self.id) if self.position == 1 else
+                  system.difference(self.b, self.wiper) / (self.resistance * (1 - self.position)))
+        return {"1": first, "2": second, "3": -first - second}
+
+
+DEVICE_TYPES.update({"diode": Diode, "wire": Wire, "capacitor": Capacitor,
+                     "inductor": Inductor, "potentiometer": Potentiometer,
+                     "photodiode": Photodiode})

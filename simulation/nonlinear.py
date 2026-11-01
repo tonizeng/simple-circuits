@@ -14,6 +14,8 @@ def solve_led_dc(circuit):
     seed = solve_dc(circuit, led_model="fixed")
     if seed.status in ("unsupported", "invalid", "empty", "numerical_error"):
         return seed
+    if any(c.type in ("diode", "photodiode") for c in circuit.components):
+        return SimulationResult("unsupported", "Optional exponential LED mode currently excludes other diode types; use fixed mode.")
     ground, nodes = seed.ground_node, circuit.terminal_nodes()
     devices = [DEVICE_TYPES[c.type](c, nodes, c.type == "led") for c in circuit.components]
     system = MNA(circuit, ground, devices)

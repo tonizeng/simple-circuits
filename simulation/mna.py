@@ -17,7 +17,7 @@ from components import contact_closed
 from .devices import DEVICE_TYPES
 
 
-MAX_LEDS = 8
+MAX_JUNCTIONS = 8
 MAX_UNKNOWNS = 128
 ATOL = 1e-9
 RTOL = 1e-7
@@ -28,6 +28,7 @@ class ComponentResult:
     voltage_v: float | None
     current_a: float | None
     state: str | None = None
+    terminal_currents_a: dict | None = None
 
 
 @dataclass
@@ -65,6 +66,9 @@ class MNA:
         vector = self.zero()
         vector[self.branch_indices[cid]] = 1
         return vector
+
+    def current_source(self, a, b, value):
+        self.rhs -= value * self.difference(a, b)
 
     def conductance(self, a, b, value):
         incidence = self.difference(a, b)
@@ -191,17 +195,19 @@ def solve_dc(circuit, led_model="fixed"):
         if len(sources) != 1:
             return SimulationResult("invalid", "Choose an explicit ground_node unless there is exactly one DC source.")
         ground = circuit.terminal_nodes()[(sources[0].id, "2")]
-    leds = [c.id for c in circuit.components if c.type == "led"]
-    if len(leds) > MAX_LEDS:
-        return SimulationResult("unsupported", f"Initial solver supports at most {MAX_LEDS} LEDs.", ground)
+    junctions = [c.id for c in circuit.components if c.type in ("led", "diode", "photodiode")]
+    if len(junctions) > MAX_JUNCTIONS:
+        return SimulationResult("unsupported", f"Initial solver supports at most {MAX_JUNCTIONS} diode/LED/photodiode junctions.", ground)
     nodes = circuit.terminal_nodes()
     ranges = {("node", net.id): [] for net in circuit.nets}
     for c in circuit.components:
         ranges[("voltage", c.id)], ranges[("current", c.id)] = [], []
+    pot_currents = {(c.id, terminal): [] for c in circuit.components if c.type == "potentiometer"
+                    for terminal in ("1", "2", "3")}
     feasible = 0
     try:
-        for states in product((False, True), repeat=len(leds)):
-            active = dict(zip(leds, states))
+        for states in product((False, True), repeat=len(junctions)):
+            active = dict(zip(junctions, states))
             devices = [DEVICE_TYPES[c.type](c, nodes, active.get(c.id, False)) for c in circuit.components]
             system = MNA(circuit, ground, devices)
             if system.size > MAX_UNKNOWNS:
@@ -217,7 +223,11 @@ def solve_dc(circuit, led_model="fixed"):
                 ranges[("node", net.id)].append(region.range(system.difference(net.id, ground)))
             for device in devices:
                 ranges[("voltage", device.id)].append(region.range(device.voltage(system)))
-                ranges[("current", device.id)].append(region.range(device.current(system)))
+                low, high = region.range(device.current(system))
+                ranges[("current", device.id)].append((low + device.current_offset, high + device.current_offset))
+                if device.component.type == "potentiometer":
+                    for terminal, coefficients in device.terminal_currents(system).items():
+                        pot_currents[(device.id, terminal)].append(region.range(coefficients))
     except (np.linalg.LinAlgError, NumericalError, FloatingPointError) as error:
         return SimulationResult("numerical_error", f"Numerical solve failed: {error}", ground)
     if not feasible:
@@ -228,12 +238,22 @@ def solve_dc(circuit, led_model="fixed"):
     for c in circuit.components:
         voltage, current = values[("voltage", c.id)], values[("current", c.id)]
         state = None
-        if c.type == "led":
+        if c.type in ("led", "diode"):
             state = "unknown" if current is None else ("on" if current > ATOL else "off")
         elif c.type in ("switch", "button"):
             state = "closed" if contact_closed(c) else "open"
-        results[c.id] = ComponentResult(voltage, current, state)
+        elif c.type == "photodiode":
+            state = "illuminated" if c.parameters["photocurrent_a"] > 0 else "dark"
+        elif c.type == "capacitor":
+            state = "dc open circuit"
+        elif c.type in ("inductor", "wire"):
+            state = "dc zero voltage"
+        terminal_currents = ({terminal: unique_value(pot_currents[(c.id, terminal)])
+                              for terminal in ("1", "2", "3")} if c.type == "potentiometer" else None)
+        results[c.id] = ComponentResult(voltage, current, state, terminal_currents)
     partial = any(value is None for value in values.values())
     message = ("DC solved partially: floating voltages or ideal-branch currents are not uniquely determined (—)."
                if partial else "DC operating point solved.")
+    if any(c.type in ("capacitor", "inductor") for c in circuit.components):
+        message += " DC equilibrium only; no charging or current-ramp waveform."
     return SimulationResult("partial" if partial else "solved", message, ground, node_voltages, results)

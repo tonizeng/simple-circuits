@@ -26,8 +26,8 @@ class DatabaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             database = CircuitDatabase(Path(folder) / "circuits.sqlite3")
             names = database.import_folder(examples)
-            self.assertEqual(len(names), 12)
-            self.assertEqual(len(set(names)), 12)
+            self.assertEqual(len(names), 11)
+            self.assertEqual(len(set(names)), 11)
             for path in examples.glob("*.json"):
                 data = json.loads(path.read_text())
                 self.assertEqual(database.load(data["name"]), data)

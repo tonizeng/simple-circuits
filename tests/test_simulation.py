@@ -145,9 +145,9 @@ class SimulationTests(unittest.TestCase):
         self.assertIsNone(result.components["LED2"].current_a)
         self.assertAlmostEqual(result.components["R1"].current_a, 3 / 330)
 
-    def test_out_of_scope_circuits_remain_explicitly_unsupported(self):
-        for number in range(6, 13):
+    def test_remaining_examples_have_dc_operating_points(self):
+        for number in (6, 7, 8, 9, 10, 12):
             with self.subTest(number=number):
                 result = solve(example(number))
-                self.assertEqual(result.status, "unsupported")
-                self.assertFalse(result.components)
+                self.assertEqual(result.status, "solved", result.message)
+                self.assertTrue(result.components)

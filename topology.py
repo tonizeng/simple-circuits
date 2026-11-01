@@ -98,6 +98,10 @@ def parse_topology(data):
                 (minimum is not None and (value <= minimum if exclusive else value < minimum)) or
                 (maximum is not None and value > maximum)):
                 raise TopologyError(f"{cid}: invalid {key} value.")
+        if kind == "photodiode" and "forward_voltage_v" in params:
+            value = params["forward_voltage_v"]
+            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+                raise TopologyError(f"{cid}: forward_voltage_v must be positive and finite.")
         for key in BOOLEAN_PARAMETERS.get(kind, ()):
             if type(params.get(key)) is not bool:
                 raise TopologyError(f"{cid}: {key} must be a boolean.")

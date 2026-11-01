@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor, QFont, QPainterPath, QPainterPathStroker, QPen, QPolygonF
-from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsPathItem, QGraphicsSimpleTextItem
+from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsDropShadowEffect
 from components import nominal_label, contact_closed, engineering
 from layout import series_parallel_layout
 
@@ -22,8 +22,7 @@ class ResultBox(QGraphicsPathItem):
                          3 if active else 2))
         self.setBrush(QColor("#f5f9ef" if active else "#ffffff"))
         if self.symbol is not None:
-            self.symbol.highlighted = active
-            self.symbol.update()
+            self.symbol.set_highlight(active)
 
     def hoverEnterEvent(self, event):
         self.highlight(True)
@@ -40,6 +39,14 @@ class NetLabel(QGraphicsSimpleTextItem):
         self.setFont(font)
         self.net = net
         self.setAcceptHoverEvents(True)
+
+    def boundingRect(self):
+        return super().boundingRect().adjusted(-6, -6, 6, 6)
+
+    def shape(self):
+        path = QPainterPath()
+        path.addRect(self.boundingRect())
+        return path
 
     def hoverEnterEvent(self, event):
         self.net.highlight(True)
@@ -63,11 +70,11 @@ class NetWire(QGraphicsPathItem):
 
     def shape(self):
         stroker = QPainterPathStroker()
-        stroker.setWidth(12)
+        stroker.setWidth(18)
         return stroker.createStroke(self.path())
 
     def boundingRect(self):
-        return self.path().boundingRect().adjusted(-6, -6, 6, 6)
+        return self.path().boundingRect().adjusted(-9, -9, 9, 9)
 
     def highlight(self, active):
         color = QColor("#787aaf" if active else "#555555")
@@ -101,6 +108,34 @@ def add_net(scene, path, text, x, y):
     return wire
 
 
+class ComponentLabel(QGraphicsSimpleTextItem):
+    """Nominal values share the symbol/result hover state."""
+    def __init__(self, text, symbol):
+        super().__init__(text)
+        self.symbol = symbol
+        self.glow = QGraphicsDropShadowEffect()
+        self.glow.setColor(QColor("#a2c96e"))
+        self.glow.setOffset(0, 0)
+        self.glow.setBlurRadius(10)
+        self.glow.setEnabled(False)
+        self.setGraphicsEffect(self.glow)
+        self.setAcceptHoverEvents(True)
+
+    def hoverEnterEvent(self, event):
+        if self.symbol.result_box is not None:
+            self.symbol.result_box.highlight(True)
+        else:
+            self.symbol.set_highlight(True)
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        if self.symbol.result_box is not None:
+            self.symbol.result_box.highlight(False)
+        else:
+            self.symbol.set_highlight(False)
+        super().hoverLeaveEvent(event)
+
+
 class ComponentSymbol(QGraphicsItem):
     """Terminal 1 is on the left; terminal 2 is on the right in local space."""
 
@@ -109,6 +144,7 @@ class ComponentSymbol(QGraphicsItem):
         self.component = component
         self.highlighted = False
         self.result_box = None
+        self.value_label = None
         self.current_a = None
         self.setAcceptHoverEvents(True)
         self.terminals = {"1": QPointF(-60, 0), "2": QPointF(60, 0)}
@@ -117,18 +153,25 @@ class ComponentSymbol(QGraphicsItem):
         self.setToolTip(f"{component.id}: {component.type}\n1: local left, 2: local right"
                         + ("\n3: wiper" if component.type == "potentiometer" else ""))
 
+    def set_highlight(self, active):
+        self.highlighted = active
+        if self.value_label is not None:
+            self.value_label.setBrush(QColor("#222222"))
+            self.value_label.glow.setEnabled(active)
+        self.update()
+
     def terminal_position(self, terminal):
         return self.mapToScene(self.terminals[terminal])
 
     def hoverEnterEvent(self, event):
-        self.highlighted = True
+        self.set_highlight(True)
         if self.result_box is not None:
             self.result_box.highlight(True)
         self.update()
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
-        self.highlighted = False
+        self.set_highlight(False)
         if self.result_box is not None:
             self.result_box.highlight(False)
         self.update()
@@ -147,7 +190,7 @@ class ComponentSymbol(QGraphicsItem):
         painter.setPen(QPen(QColor("#a2c96e" if self.highlighted else "#222222"),
                             3 if self.highlighted else 2))
         kind = self.component.type
-        edge = 24 if kind in ("voltage_source", "motor") else 30
+        edge = 24 if kind == "voltage_source" else 30
         painter.drawLine(QPointF(-60, 0), QPointF(-edge, 0))
         painter.drawLine(QPointF(edge, 0), QPointF(60, 0))
         if kind in ("resistor", "potentiometer"):
@@ -158,21 +201,11 @@ class ComponentSymbol(QGraphicsItem):
             if kind == "potentiometer":
                 painter.drawLine(QPointF(0, 50), QPointF(0, 14))
                 self.draw_arrow(painter, QPointF(0, 36), QPointF(0, 14))
-        elif kind in ("voltage_source", "motor"):
+        elif kind == "voltage_source":
             painter.drawEllipse(QRectF(-24, -24, 48, 48))
-            if kind == "motor":
-                font = QFont(QApplication.font())
-                font.setPixelSize(14)
-                painter.setFont(font)
-                from PySide6.QtCore import Qt
-                painter.save()
-                painter.rotate(-self.rotation())
-                painter.drawText(QRectF(-20, -20, 40, 40), Qt.AlignmentFlag.AlignCenter, "M")
-                painter.restore()
-            else:
-                painter.drawLine(QPointF(-16, 0), QPointF(-6, 0))
-                painter.drawLine(QPointF(-11, -5), QPointF(-11, 5))
-                painter.drawLine(QPointF(6, 0), QPointF(16, 0))
+            painter.drawLine(QPointF(-16, 0), QPointF(-6, 0))
+            painter.drawLine(QPointF(-11, -5), QPointF(-11, 5))
+            painter.drawLine(QPointF(6, 0), QPointF(16, 0))
         elif kind in ("led", "diode", "photodiode"):
             painter.drawLine(QPointF(-30, 0), QPointF(-15, 0))
             painter.drawPolygon(QPolygonF([QPointF(-15, -14), QPointF(-15, 14), QPointF(15, 0)]))
@@ -211,7 +244,7 @@ class ComponentSymbol(QGraphicsItem):
             painter.drawEllipse(point, 3, 3)
         arrow = self.current_arrow_points()
         if arrow is not None:
-            painter.setPen(QPen(QColor("#a2c96e" if self.highlighted else "#787aaf"), 2))
+            painter.setPen(QPen(QColor("#1b5a88" if self.highlighted else "#2878b5"), 2))
             self.draw_arrow(painter, *arrow)
 
     @staticmethod
@@ -224,10 +257,16 @@ class ComponentSymbol(QGraphicsItem):
                                                7 * math.sin(angle + offset)))
 
 
-def add_label(scene, text, x, y):
+def add_label(scene, text, x, y, component=None):
     font = QFont(QApplication.font())
     font.setPixelSize(14)
-    label = scene.addSimpleText(text, font)
+    if component is None:
+        label = scene.addSimpleText(text, font)
+    else:
+        label = ComponentLabel(text, component)
+        label.setFont(font)
+        scene.addItem(label)
+        component.value_label = label
     label.setPos(x, y)
     label.setBrush(QColor("#222222"))
     return label
@@ -341,7 +380,7 @@ def render_circuit(scene, circuit, simulation=None):
         symbols[component.id] = symbol
         label = add_label(
             scene, nominal_label(component),
-            0, symbol.y() + (90 if component.type == "potentiometer" else 28),
+            0, symbol.y() + (90 if component.type == "potentiometer" else 28), component=symbol,
         )
         if component.type == "led" and simulation is not None:
             label.setToolTip("Nominal LED forward voltage; the default classroom model treats this as a fixed drop while conducting.")
@@ -362,6 +401,11 @@ def render_circuit(scene, circuit, simulation=None):
         symbol.current_a = result.current_a if result is not None else None
         output = add_label(scene, f"V: {voltage}\nI: {current}", 0, 0)
         message = simulation.message if simulation is not None else "No simulation results supplied."
+        if result is not None and result.terminal_currents_a is not None:
+            message += "\nPotentiometer I is current entering terminal 1; V is across track ends 1 and 2."
+            message += "\nTerminal currents: " + ", ".join(
+                f"{terminal}: {engineering(current, 'A') if current is not None else '—'}"
+                for terminal, current in result.terminal_currents_a.items())
         if result is not None and result.state:
             message += f"\nState: {result.state}"
         output.setToolTip(message + "\nV = V1 − V2. I displays magnitude; the arrow shows conventional current direction.")

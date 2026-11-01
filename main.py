@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from dataclasses import replace
 
-from PySide6.QtCore import Qt, QSize, QRectF, QUrl
+from PySide6.QtCore import Qt, QSize, QRectF, QUrl, QPoint
 from PySide6.QtGui import QFont, QFontDatabase, QPainter, QPixmap, QDesktopServices
 from topology import parse_topology, TopologyError
 from schematic import render_circuit, ComponentSymbol
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QApplication, QFrame, QGraphicsScene, QGraphicsView, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
     QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QDialog, QListWidget, QDialogButtonBox,
+    QAbstractItemView, QDialog, QListWidget, QDialogButtonBox, QScrollArea, QTabWidget,
 )
 
 
@@ -82,6 +82,10 @@ class CircuitWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
         right_layout.addStretch()
+        self.examples_button = self.button("View Examples")
+        self.examples_button.clicked.connect(self.show_examples)
+        right_layout.addWidget(self.examples_button)
+        right_layout.addWidget(self.button("Settings"))
         right_layout.addWidget(self.button("Save Schematic"))
         self.export_button = self.button("Export to Falstad")
         self.export_button.clicked.connect(self.open_in_falstad)
@@ -103,15 +107,6 @@ class CircuitWindow(QMainWindow):
         panel_layout.setContentsMargins(0, 0, 0, 0)
         panel_layout.setSpacing(0)
 
-        title = QLabel("Control Panel")
-        title.setObjectName("panelTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setFixedHeight(44)
-        panel_layout.addWidget(title)
-
-        panel_content = QVBoxLayout()
-        panel_content.setContentsMargins(14, 18, 14, 14)
-        panel_content.setSpacing(12)
         self.component_legend = QTableWidget(0, 2)
         self.component_legend.setAccessibleName("Circuit component legend")
         self.component_legend.setHorizontalHeaderLabels(["Symbol", "Name"])
@@ -129,13 +124,50 @@ class CircuitWindow(QMainWindow):
         self.component_legend.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.component_legend.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.component_legend.setFixedHeight(self.component_legend.horizontalHeader().sizeHint().height())
-        panel_content.addWidget(self.component_legend)
-        panel_content.addStretch(1)
-        self.examples_button = self.button("View Examples")
-        self.examples_button.clicked.connect(self.show_examples)
-        panel_content.addWidget(self.examples_button)
-        panel_content.addWidget(self.button("Settings"))
-        panel_layout.addLayout(panel_content, 1)
+        self.sidebar_tabs = QTabWidget()
+        self.sidebar_tabs.setObjectName("sidebarTabs")
+        self.sidebar_tabs.setAccessibleName("Circuit sidebar pages")
+        components_page = QWidget()
+        components_page.setObjectName("componentsPage")
+        components_layout = QVBoxLayout(components_page)
+        components_layout.setContentsMargins(14, 14, 14, 14)
+        components_layout.addWidget(self.component_legend)
+        components_layout.addStretch(1)
+        self.sidebar_tabs.addTab(components_page, "Components")
+        panel_layout.addWidget(self.sidebar_tabs, 1)
+        reading_box = QFrame()
+        reading_box.setObjectName("readingBox")
+        reading_layout = QVBoxLayout(reading_box)
+        reading_layout.setContentsMargins(18, 18, 18, 18)
+        reading_layout.setSpacing(16)
+        self.reading_guide = QLabel(
+            '<p style="margin-top: 0; margin-bottom: 6px;"><b>Current</b></p>'
+            '<p style="margin-top: 0; margin-bottom: 20px;">Blue arrows indicate conventional '
+            'current direction. The displayed current is its magnitude, in amperes (A).</p>'
+            '<p style="margin-top: 0; margin-bottom: 6px;"><b>Voltage</b></p>'
+            '<p style="margin-top: 0; margin-bottom: 10px;">Voltage is measured from '
+            'terminal 1 to terminal 2:</p>'
+            '<p style="margin-top: 0; margin-bottom: 10px;">V = V(1) − V(2)</p>'
+            '<p style="margin-top: 0; margin-bottom: 20px;">A positive value means terminal 1 '
+            'is at a higher potential; a negative value means terminal 2 is higher.</p>'
+            '<p style="margin-top: 0; margin-bottom: 6px;"><b>Unavailable results</b></p>'
+            '<p style="margin-top: 0; margin-bottom: 0;">A dash (—) indicates that a result '
+            'cannot be determined.</p>'
+        )
+        self.reading_guide.setObjectName("readingGuide")
+        self.reading_guide.setTextFormat(Qt.TextFormat.RichText)
+        self.reading_guide.setWordWrap(True)
+        self.reading_guide.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.reading_guide.setAccessibleName("Circuit guide for the schematic")
+        self.reading_scroll = QScrollArea()
+        self.reading_scroll.setObjectName("readingScroll")
+        self.reading_scroll.setWidgetResizable(True)
+        self.reading_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.reading_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.reading_scroll.setMinimumHeight(80)
+        self.reading_scroll.setWidget(self.reading_guide)
+        reading_layout.addWidget(self.reading_scroll, 1)
+        self.sidebar_tabs.addTab(reading_box, "Learn")
         body.addWidget(panel)
 
         self.scene = QGraphicsScene(self)
@@ -145,7 +177,11 @@ class CircuitWindow(QMainWindow):
         self.canvas.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.circuit = None
         self.simulation_result = None
-        body.addWidget(self.canvas, 1)
+        schematic_area = QVBoxLayout()
+        schematic_area.setContentsMargins(0, 0, 0, 0)
+        schematic_area.setSpacing(8)
+        schematic_area.addWidget(self.canvas, 1)
+        body.addLayout(schematic_area, 1)
 
         self.setStyleSheet("""
             QWidget {
@@ -157,10 +193,54 @@ class CircuitWindow(QMainWindow):
             QFrame#header, QFrame#controlPanel { background: #d9d9d9; }
             QFrame#controlPanel { border: 1px solid #a8a8a8; }
             QLabel { background: transparent; }
+            QFrame#readingBox { background: #d9d9d9; border: none; }
+            QTabWidget#sidebarTabs::pane { border: none; border-top: 1px solid #a8a8a8; background: #d9d9d9; }
+            QTabWidget#sidebarTabs > QWidget, QWidget#componentsPage { background: #d9d9d9; }
+            QTabBar { background: #d9d9d9; }
+            QTabBar::tab {
+                background: #d9d9d9;
+                color: #555555;
+                padding: 9px 12px;
+                border: none;
+                border-bottom: 2px solid transparent;
+                font-size: 14px;
+            }
+            QTabBar::tab:hover { background: #e3e3e3; color: #111111; }
+            QTabBar::tab:selected {
+                background: #f1f1f1;
+                color: #111111;
+                border-bottom: 2px solid #787aaf;
+                font-weight: bold;
+            }
+            QLabel#readingGuide { font-size: 14px; background: #d9d9d9; }
+            QScrollArea#readingScroll, QScrollArea#readingScroll > QWidget { background: #d9d9d9; border: none; }
+            QScrollArea#readingScroll QScrollBar:vertical {
+                background: transparent;
+                width: 6px;
+                margin: 0;
+            }
+            QScrollArea#readingScroll QScrollBar::handle:vertical {
+                background: #b0b0b0;
+                border-radius: 3px;
+                min-height: 24px;
+            }
+            QScrollArea#readingScroll QScrollBar::handle:vertical:hover {
+                background: #888888;
+            }
+            QScrollArea#readingScroll QScrollBar::add-line:vertical,
+            QScrollArea#readingScroll QScrollBar::sub-line:vertical {
+                height: 0;
+                border: none;
+                background: transparent;
+            }
+            QScrollArea#readingScroll QScrollBar::add-page:vertical,
+            QScrollArea#readingScroll QScrollBar::sub-page:vertical {
+                background: transparent;
+            }
             QFrame#header > QWidget { background: transparent; }
             QTableWidget {
                 background: #ffffff;
-                font-size: 13px;
+                font-size: 14px;
                 border: 1px solid #a8a8a8;
                 gridline-color: #a8a8a8;
             }
@@ -169,8 +249,8 @@ class CircuitWindow(QMainWindow):
             QHeaderView::section {
                 background: #e8e8e8;
                 color: #111111;
-                font-size: 13px;
-                font-weight: normal;
+                font-size: 14px;
+                font-weight: bold;
                 padding: 6px 2px;
                 border: 0;
                 border-bottom: 1px solid #a8a8a8;
@@ -184,12 +264,6 @@ class CircuitWindow(QMainWindow):
                 font-size: 16px;
                 font-weight: 500;
                 padding: 0 10px;
-            }
-            QLabel#panelTitle {
-                background: #c6c6c6;
-                border-bottom: 1px solid #a8a8a8;
-                font-size: 16px;
-                font-weight: bold;
             }
             QPushButton {
                 background: #e8e8e8;
@@ -244,7 +318,10 @@ class CircuitWindow(QMainWindow):
         for row, component in enumerate(types.values()):
             icon_scene = QGraphicsScene()
             icon_scene.addItem(ComponentSymbol(component))
-            pixmap = QPixmap(100, 56)
+            # Render vectors at display density instead of enlarging a small bitmap.
+            pixel_ratio = max(2.0, self.devicePixelRatioF())
+            pixmap = QPixmap(round(100 * pixel_ratio), round(56 * pixel_ratio))
+            pixmap.setDevicePixelRatio(pixel_ratio)
             pixmap.fill(Qt.GlobalColor.transparent)
             painter = QPainter(pixmap)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)

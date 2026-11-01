@@ -17,8 +17,8 @@ On Windows, create the environment with `python` and activate it with
 
 ## current features
 
-- Twelve circuit examples, vector symbols, component legends, and hover highlights.
-- DC MNA and Falstad export for examples 1–5.
+- Eleven circuit examples, vector symbols, component legends, and hover highlights.
+- DC steady-state MNA for all 11 examples; Falstad export for examples 1–5.
 - SQLite example browser; an empty database is seeded automatically.
 - Current magnitude and direction arrows; unknown results display `—`.
 
@@ -26,8 +26,9 @@ Switches/buttons reflect topology data and cannot be changed in the UI. LEDs use
 fixed forward voltage by default; an optional exponential solver is available
 with `solve_dc(circuit, led_model="falstad")`.
 
-Hardware communication, UI saving/settings, transient simulation, and the
-remaining component models are still pending.
+Capacitors are open and inductors are zero-voltage connections at DC equilibrium.
+Charging and other transient waveforms are not simulated.
+Hardware communication, UI saving/settings, and transient simulation remain pending.
 
 ## useful commands
 
@@ -49,4 +50,5 @@ README update entries and lowercase commit messages. This checkout is configured
 ## updates
 
 - 2026-10-31 — add simple circuits desktop prototype
-- 2026-10-31 — --amend-no-edit
+## Updates
+- 2026-10-31 — add more component types

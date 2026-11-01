@@ -87,7 +87,7 @@ class FalstadTests(unittest.TestCase):
                 self.assertEqual(record[7], "true" if number == 5 else "false")
 
     def test_unsupported_types_are_not_silently_dropped(self):
-        for number in range(6, 13):
+        for number in (6, 7, 8, 9, 10, 12):
             with self.subTest(number=number), self.assertRaises(FalstadExportError):
                 export_falstad(parse_topology(example(number)))
 
