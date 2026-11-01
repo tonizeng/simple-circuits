@@ -7,6 +7,15 @@ from components import nominal_label, contact_closed, engineering
 from layout import series_parallel_layout
 
 
+DEFAULT_HIGHLIGHT_COLORS = {"component": "#a2c96e", "node": "#787aaf", "current": "#2878b5"}
+
+
+def highlight_color(item, role):
+    scene = item.scene()
+    colors = scene.property("highlightColors") if scene is not None else None
+    return QColor((colors or DEFAULT_HIGHLIGHT_COLORS)[role])
+
+
 class ResultBox(QGraphicsPathItem):
     """Prototype readout with a green hover border."""
 
@@ -18,9 +27,14 @@ class ResultBox(QGraphicsPathItem):
         self.highlight(False)
 
     def highlight(self, active):
-        self.setPen(QPen(QColor("#a2c96e" if active else "#888888"),
+        self.setPen(QPen(highlight_color(self, "component") if active else QColor("#888888"),
                          3 if active else 2))
-        self.setBrush(QColor("#f5f9ef" if active else "#ffffff"))
+        fill = QColor("#ffffff")
+        if active:
+            tint = highlight_color(self, "component")
+            fill = QColor(*(round(255 * 0.9 + channel * 0.1)
+                            for channel in (tint.red(), tint.green(), tint.blue())))
+        self.setBrush(fill)
         if self.symbol is not None:
             self.symbol.set_highlight(active)
 
@@ -77,7 +91,7 @@ class NetWire(QGraphicsPathItem):
         return self.path().boundingRect().adjusted(-9, -9, 9, 9)
 
     def highlight(self, active):
-        color = QColor("#787aaf" if active else "#555555")
+        color = highlight_color(self, "node") if active else QColor("#555555")
         self.setPen(QPen(color, 3 if active else 1.5))
         if self.label is not None:
             self.label.setBrush(color if active else QColor("#222222"))
@@ -157,6 +171,7 @@ class ComponentSymbol(QGraphicsItem):
         self.highlighted = active
         if self.value_label is not None:
             self.value_label.setBrush(QColor("#222222"))
+            self.value_label.glow.setColor(highlight_color(self, "component"))
             self.value_label.glow.setEnabled(active)
         self.update()
 
@@ -187,7 +202,7 @@ class ComponentSymbol(QGraphicsItem):
         return (start, end) if self.current_a > 0 else (end, start)
 
     def paint(self, painter, option, widget=None):
-        painter.setPen(QPen(QColor("#a2c96e" if self.highlighted else "#222222"),
+        painter.setPen(QPen(highlight_color(self, "component") if self.highlighted else QColor("#222222"),
                             3 if self.highlighted else 2))
         kind = self.component.type
         edge = 24 if kind == "voltage_source" else 30
@@ -244,7 +259,7 @@ class ComponentSymbol(QGraphicsItem):
             painter.drawEllipse(point, 3, 3)
         arrow = self.current_arrow_points()
         if arrow is not None:
-            painter.setPen(QPen(QColor("#1b5a88" if self.highlighted else "#2878b5"), 2))
+            painter.setPen(QPen(highlight_color(self, "current").darker(130) if self.highlighted else highlight_color(self, "current"), 2))
             self.draw_arrow(painter, *arrow)
 
     @staticmethod

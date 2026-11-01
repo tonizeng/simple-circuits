@@ -22,7 +22,7 @@ On Windows, create the environment with `python` and activate it with
 - Eleven circuit examples, vector symbols, component legends, hover highlights,
   and a Learn tab explaining results.
 - DC steady-state MNA for all 11 examples; Falstad export for all bundled examples.
-- SQLite example browser; an empty database is seeded automatically.
+- SQLite circuit library; an empty database is seeded automatically.
 - Current magnitude and direction arrows; unknown results display `—`.
 
 Switches/buttons reflect topology data and cannot be changed in the UI. LEDs use
@@ -33,7 +33,8 @@ Capacitors are open and inductors are zero-voltage connections at DC equilibrium
 Charging and other transient waveforms are not simulated locally.
 Falstad export requires a single-source series/parallel layout with unloaded
 potentiometer wipers. Falstad runs its own simulation; results may differ.
-Hardware communication, UI saving/settings, and transient simulation remain pending.
+Settings let users choose and save component, node, and current-arrow colours.
+Hardware communication, UI saving, and transient simulation remain pending.
 
 ## useful commands
 
@@ -66,3 +67,4 @@ independently.
 - 2026-10-31 — add more component types
 - 2026-10-31 — add falstad export support for more component types
 - 2026-10-31 — update read me
+- 2026-10-31 — update ui

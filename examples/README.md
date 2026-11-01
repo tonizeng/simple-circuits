@@ -24,7 +24,7 @@ python main.py examples/01_led_series.json
 python database.py --import-examples examples
 ```
 
-Or click **View Examples** in the app. Switch/button states come from JSON,
+Or click **Circuit Library** in the app. Switch/button states come from JSON,
 reflecting the physical circuit. Undetermined results show `—`.
 
 Capacitors are open circuits and inductors are ideal shorts at DC equilibrium;
@@ -51,3 +51,4 @@ See the [Falstad/CircuitJS credits](../README.md#references) for references.
 - 2026-10-31 — add more component types
 - 2026-10-31 — add falstad export support for more component types
 - 2026-10-31 — update read me
+- 2026-10-31 — update ui

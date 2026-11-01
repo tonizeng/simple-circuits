@@ -195,7 +195,7 @@ and JSON document. Names are unique; saving an existing name replaces its JSON.
 The module offers save/load/list and JSON-folder import. The UI's View Examples
 button lists database circuits and loads the selected JSON onto the canvas.
 An empty database is seeded from bundled examples; existing records are not
-overwritten by browsing. Save/Settings remain unconnected; Export to Falstad
+overwritten by browsing. Save remains unconnected; Export to Falstad
 opens the generated link for supported circuits.
 Storage is independent of component rendering support.
 
@@ -286,7 +286,7 @@ visual only. Falstad export uses the latest received contact state.
 NumPy/SciPy are declared in requirements.txt. No Falstad solver code is copied.
 
 Current presentation: result boxes display `abs(current_a)` while the solver
-retains signed currents. Blue arrows (#2878b5) near component leads indicate actual
+retains signed currents. Arrows (#2878b5) near component leads indicate actual
 conventional current direction (1→2 for positive, 2→1 for negative). They rotate
 with symbols, darken to #1b5a88 on hover, and are hidden for unknown or
 effectively zero current (absolute value <= 1e-12 A). Voltage remains V1 − V2.
@@ -427,3 +427,10 @@ Example 5 starts with `normally_closed: false` and `pressed: true`: the normally
 open button is held down, so its contact is closed. This changes sample input,
 not UI controls or hardware-state interpretation. Received topology remains
 authoritative. The matching bundled database record and Falstad text are updated.
+
+## Highlight colour settings
+
+The header gear opens colour settings for components (including value glow),
+connected nodes, and current arrows. Save applies and persists these preferences
+using Qt QSettings; Cancel discards edits, and Restore defaults resets the choices
+in the popup. Component value text stays black. This changes presentation only.

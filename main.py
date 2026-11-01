@@ -7,10 +7,10 @@ import json
 from pathlib import Path
 from dataclasses import replace
 
-from PySide6.QtCore import Qt, QSize, QRectF, QUrl, QPoint
-from PySide6.QtGui import QFont, QFontDatabase, QPainter, QPixmap, QDesktopServices
+from PySide6.QtCore import Qt, QSize, QRectF, QUrl, QPoint, QSettings
+from PySide6.QtGui import QFont, QFontDatabase, QPainter, QPixmap, QDesktopServices, QColor
 from topology import parse_topology, TopologyError
-from schematic import render_circuit, ComponentSymbol
+from schematic import render_circuit, ComponentSymbol, DEFAULT_HIGHLIGHT_COLORS
 from components import COMPONENT_NAMES
 from database import CircuitDatabase
 from simulation import solve_dc
@@ -19,8 +19,74 @@ from PySide6.QtWidgets import (
     QApplication, QFrame, QGraphicsScene, QGraphicsView, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
     QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QDialog, QListWidget, QDialogButtonBox, QScrollArea, QTabWidget,
+    QAbstractItemView, QDialog, QListWidget, QDialogButtonBox, QScrollArea, QTabWidget, QColorDialog, QFormLayout,
 )
+
+
+class LogoWidget(QWidget):
+    """Scale the original image for the current screen, including Retina displays."""
+
+    def __init__(self, path):
+        super().__init__()
+        self.source = QPixmap(str(path)).toImage()
+        if self.source.isNull():
+            raise RuntimeError(f"Could not load the logo: {path}")
+        self.setFixedSize(64, 64)
+        self.cached_image = None
+        self.cached_size = None
+
+    def paintEvent(self, event):
+        ratio = self.devicePixelRatioF()
+        size = QSize(round(self.width() * ratio), round(self.height() * ratio))
+        if self.cached_size != size:
+            self.cached_image = self.source.scaled(
+                size, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.cached_image.setDevicePixelRatio(ratio)
+            self.cached_size = size
+        painter = QPainter(self)
+        width = self.cached_image.width() / ratio
+        height = self.cached_image.height() / ratio
+        painter.drawImage(QRectF((self.width() - width) / 2,
+                                 (self.height() - height) / 2, width, height), self.cached_image)
+
+
+class SettingsButton(QPushButton):
+    """Borderless image button with a white hover tint."""
+
+    def __init__(self, path):
+        super().__init__()
+        self.image = QPixmap(str(path))
+        if self.image.isNull():
+            raise RuntimeError(f"Could not load the settings icon: {path}")
+        self.setFixedSize(44, 44)
+        self.pressed.connect(self.update)
+        self.released.connect(self.update)
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, event):
+        ratio = self.devicePixelRatioF()
+        size = round(30 * ratio)
+        icon = self.image.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                                 Qt.TransformationMode.SmoothTransformation)
+        tint = QColor("#222222" if self.isDown() else "#3a3a3a" if self.underMouse() else "#606060")
+        painter = QPainter(icon)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(icon.rect(), tint)
+        painter.end()
+        icon.setDevicePixelRatio(ratio)
+        painter = QPainter(self)
+        width, height = icon.width() / ratio, icon.height() / ratio
+        painter.drawPixmap(QRectF((self.width() - width) / 2, (self.height() - height) / 2,
+                                  width, height), icon, QRectF(icon.rect()))
 
 
 class CircuitWindow(QMainWindow):
@@ -28,6 +94,12 @@ class CircuitWindow(QMainWindow):
         super().__init__()
         self.database = database
         self.examples_dialog = None
+        self.preferences = QSettings("SimpleCircuits", "Desktop")
+        self.highlight_colors = dict(DEFAULT_HIGHLIGHT_COLORS)
+        for role in self.highlight_colors:
+            stored = self.preferences.value("highlights/" + role)
+            if stored and QColor(str(stored)).isValid():
+                self.highlight_colors[role] = QColor(str(stored)).name()
         self.setWindowTitle("Circuit Schematic")
         self.resize(1280, 760)
         self.setMinimumSize(800, 500)
@@ -40,7 +112,7 @@ class CircuitWindow(QMainWindow):
 
         header = QFrame()
         header.setObjectName("header")
-        header.setFixedHeight(76)
+        header.setFixedHeight(88)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(16, 12, 20, 12)
         header_layout.setSpacing(12)
@@ -49,22 +121,9 @@ class CircuitWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
 
-        logo = QLabel()
-        logo.setObjectName("logo")
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setFixedWidth(60)
         logo_path = Path(__file__).resolve().parent / "assets" / "images" / "simple_circuits_logo.png"
-        logo_pixmap = QPixmap(str(logo_path))
-        if logo_pixmap.isNull():
-            raise RuntimeError(f"Could not load the logo: {logo_path}")
-        pixel_ratio = self.devicePixelRatioF()
-        logo_display = logo_pixmap.scaled(
-            round(52 * pixel_ratio), round(52 * pixel_ratio),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        logo_display.setDevicePixelRatio(pixel_ratio)
-        logo.setPixmap(logo_display)
+        logo = LogoWidget(logo_path)
+        logo.setObjectName("logo")
         logo.setAccessibleName("Simple Circuits logo")
         logo.setToolTip("Simple Circuits")
         left_layout.addWidget(logo)
@@ -76,16 +135,24 @@ class CircuitWindow(QMainWindow):
         self.circuit_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.circuit_name.textChanged.connect(self.resize_circuit_title)
         left_layout.addWidget(self.circuit_name)
+        self.settings_button = SettingsButton(
+            Path(__file__).resolve().parent / "assets" / "images" / "settings.png"
+        )
+        self.settings_button.setObjectName("settingsButton")
+        self.settings_button.setFixedSize(44, 44)
+        self.settings_button.setAccessibleName("Settings")
+        self.settings_button.setToolTip("Settings")
+        self.settings_button.clicked.connect(self.show_settings)
+        left_layout.addWidget(self.settings_button)
         left_layout.addStretch()
         right_header = QWidget()
         right_layout = QHBoxLayout(right_header)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
         right_layout.addStretch()
-        self.examples_button = self.button("View Examples")
+        self.examples_button = self.button("Circuit Library")
         self.examples_button.clicked.connect(self.show_examples)
         right_layout.addWidget(self.examples_button)
-        right_layout.addWidget(self.button("Settings"))
         right_layout.addWidget(self.button("Save Schematic"))
         self.export_button = self.button("Export to Falstad")
         self.export_button.clicked.connect(self.open_in_falstad)
@@ -142,7 +209,7 @@ class CircuitWindow(QMainWindow):
         reading_layout.setSpacing(16)
         self.reading_guide = QLabel(
             '<p style="margin-top: 0; margin-bottom: 6px;"><b>Current</b></p>'
-            '<p style="margin-top: 0; margin-bottom: 20px;">Blue arrows indicate conventional '
+            '<p style="margin-top: 0; margin-bottom: 20px;">Arrows indicate conventional '
             'current direction. The displayed current is its magnitude, in amperes (A).</p>'
             '<p style="margin-top: 0; margin-bottom: 6px;"><b>Voltage</b></p>'
             '<p style="margin-top: 0; margin-bottom: 10px;">Voltage is measured from '
@@ -150,6 +217,24 @@ class CircuitWindow(QMainWindow):
             '<p style="margin-top: 0; margin-bottom: 10px;">V = V(1) − V(2)</p>'
             '<p style="margin-top: 0; margin-bottom: 20px;">A positive value means terminal 1 '
             'is at a higher potential; a negative value means terminal 2 is higher.</p>'
+            '<p style="margin-top: 0; margin-bottom: 6px;"><b>Ground reference</b></p>'
+            '<p style="margin-top: 0; margin-bottom: 20px;">Ground is the node chosen as 0 V. '
+            'All node voltages are measured relative to it; component voltages are the '
+            'difference between their terminal voltages. Ground is a reference, not '
+            'necessarily a connection to earth. This app uses the specified ground node, '
+            'or the negative terminal of the DC source when there is exactly one source.</p>'
+            '<p style="margin-top: 0; margin-bottom: 6px;"><b>How the circuit is solved</b></p>'
+            '<p style="margin-top: 0; margin-bottom: 10px;">The app uses Modified Nodal '
+            'Analysis (MNA). It combines current balance at each node with component '
+            'equations, such as Ohm’s law, into a system of equations. Solving that '
+            'system gives node voltages and component currents.</p>'
+            '<p style="margin-top: 0; margin-bottom: 10px;">LEDs and diodes use a fixed '
+            'forward-voltage model by default. The solver checks conducting and '
+            'non-conducting states to find a consistent solution. Switch and button '
+            'states come from the circuit data.</p>'
+            '<p style="margin-top: 0; margin-bottom: 20px;">Results describe DC steady '
+            'state, after changes have settled. Ideal capacitors act as open circuits '
+            'and ideal inductors as short circuits. Changes over time are not simulated.</p>'
             '<p style="margin-top: 0; margin-bottom: 6px;"><b>Unavailable results</b></p>'
             '<p style="margin-top: 0; margin-bottom: 0;">A dash (—) indicates that a result '
             'cannot be determined.</p>'
@@ -171,6 +256,7 @@ class CircuitWindow(QMainWindow):
         body.addWidget(panel)
 
         self.scene = QGraphicsScene(self)
+        self.scene.setProperty("highlightColors", self.highlight_colors)
         self.canvas = QGraphicsView(self.scene)
         self.canvas.setObjectName("schematicCanvas")
         self.canvas.setAccessibleName("Circuit schematic canvas")
@@ -270,6 +356,15 @@ class CircuitWindow(QMainWindow):
                 border: 1px solid #a8a8a8;
                 padding: 12px 18px;
             }
+            QPushButton#settingsButton {
+                padding: 0;
+                font-size: 40px;
+                background: transparent;
+                border: none;
+            }
+            QPushButton#settingsButton:hover { background: transparent; color: #ffffff; }
+            QPushButton#settingsButton:pressed { background: transparent; color: #eeeeee; }
+            QPushButton#settingsButton:focus { border: none; }
             QPushButton:hover { background: #f1f1f1; }
             QPushButton:pressed { background: #cccccc; }
             QPushButton:focus { border: 2px solid #777777; }
@@ -360,6 +455,63 @@ class CircuitWindow(QMainWindow):
             self.canvas.centerOn(self.scene.sceneRect().center())
         return True
 
+    def show_settings(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Settings")
+        dialog.setMinimumWidth(360)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("<b>Highlight colours</b>"))
+        form = QFormLayout()
+        layout.addLayout(form)
+        draft = dict(self.highlight_colors)
+        swatches = {}
+
+        def update_swatch(role):
+            button = swatches[role]
+            color = QColor(draft[role])
+            foreground = "#111111" if color.lightness() > 140 else "#ffffff"
+            button.setText(color.name())
+            button.setStyleSheet(f"background: {color.name()}; color: {foreground}; padding: 8px 16px;")
+
+        def choose(role):
+            color = QColorDialog.getColor(QColor(draft[role]), dialog, "Choose highlight colour")
+            if color.isValid():
+                draft[role] = color.name()
+                update_swatch(role)
+
+        for role, title in (("component", "Components"), ("node", "Connected nodes"),
+                            ("current", "Current arrows")):
+            button = QPushButton()
+            button.setAccessibleName(title + " colour")
+            button.clicked.connect(lambda checked=False, role=role: choose(role))
+            swatches[role] = button
+            update_swatch(role)
+            form.addRow(title, button)
+        reset = QPushButton("Restore defaults")
+        def restore():
+            draft.update(DEFAULT_HIGHLIGHT_COLORS)
+            for role in swatches:
+                update_swatch(role)
+        reset.clicked.connect(restore)
+        layout.addWidget(reset)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save |
+                                   QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.apply_highlight_colors(draft)
+
+    def apply_highlight_colors(self, colors):
+        self.highlight_colors = dict(colors)
+        self.scene.setProperty("highlightColors", self.highlight_colors)
+        for role, color in colors.items():
+            self.preferences.setValue("highlights/" + role, color)
+        if self.circuit is not None:
+            displayed = replace(self.circuit, ground_node=self.simulation_result.ground_node)
+            render_circuit(self.scene, displayed, self.simulation_result)
+        self.scene.update()
+
     def open_in_falstad(self):
         if self.circuit is None:
             self.statusBar().showMessage("Load a circuit before exporting to Falstad.")
@@ -370,7 +522,7 @@ class CircuitWindow(QMainWindow):
             self.statusBar().showMessage(str(error))
             return
         if QDesktopServices.openUrl(QUrl(url)):
-            self.statusBar().showMessage("Opened in Falstad. Its nonlinear and transient results may differ from the local DC model.")
+            self.statusBar().showMessage("Opened in Falstad.")
         else:
             self.statusBar().showMessage("Could not open the browser. Use falstad.py --output to save circuit text.")
 
@@ -387,7 +539,7 @@ class CircuitWindow(QMainWindow):
                 self.database.import_folder(Path(__file__).resolve().parent / "examples")
                 names = self.database.list_names()
         except (OSError, sqlite3.Error, ValueError) as error:
-            QMessageBox.warning(self, "Cannot open examples", str(error))
+            QMessageBox.warning(self, "Cannot open circuit library", str(error))
             return
 
         # Use bundled file order for known examples; other database records follow.
@@ -401,7 +553,7 @@ class CircuitWindow(QMainWindow):
         names.sort(key=lambda name: (example_order.get(name, len(example_order)), name.casefold()))
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("Circuit Examples")
+        dialog.setWindowTitle("Circuit Library")
         dialog.resize(440, 440)
         layout = QVBoxLayout(dialog)
         layout.addWidget(QLabel("Select a circuit to view:"))
