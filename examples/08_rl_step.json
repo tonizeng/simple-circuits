@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "circuit_id": "08_rl_step",
+  "name": "RL Step Response",
+  "ground_node": "n0",
+  "components": [
+    {
+      "id": "V1",
+      "type": "voltage_source",
+      "parameters": {
+        "voltage_v": 5
+      }
+    },
+    {
+      "id": "R1",
+      "type": "resistor",
+      "parameters": {
+        "resistance_ohm": 100
+      }
+    },
+    {
+      "id": "L1",
+      "type": "inductor",
+      "parameters": {
+        "inductance_h": 0.01,
+        "initial_current_a": 0
+      }
+    }
+  ],
+  "nets": [
+    {
+      "id": "n1",
+      "terminals": [
+        {
+          "component_id": "V1",
+          "terminal": "1"
+        },
+        {
+          "component_id": "R1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "terminals": [
+        {
+          "component_id": "R1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "L1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n0",
+      "terminals": [
+        {
+          "component_id": "L1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "V1",
+          "terminal": "2"
+        }
+      ]
+    }
+  ]
+}

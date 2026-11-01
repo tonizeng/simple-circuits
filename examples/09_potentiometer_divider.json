@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "circuit_id": "09_potentiometer_divider",
+  "name": "Potentiometer Voltage Divider",
+  "ground_node": "n0",
+  "components": [
+    {
+      "id": "V1",
+      "type": "voltage_source",
+      "parameters": {
+        "voltage_v": 5
+      }
+    },
+    {
+      "id": "P1",
+      "type": "potentiometer",
+      "parameters": {
+        "resistance_ohm": 10000,
+        "wiper_position": 0.5
+      }
+    }
+  ],
+  "nets": [
+    {
+      "id": "n1",
+      "terminals": [
+        {
+          "component_id": "V1",
+          "terminal": "1"
+        },
+        {
+          "component_id": "P1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n0",
+      "terminals": [
+        {
+          "component_id": "V1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "P1",
+          "terminal": "2"
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "terminals": [
+        {
+          "component_id": "P1",
+          "terminal": "3"
+        }
+      ]
+    }
+  ]
+}

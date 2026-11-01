@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Keep project README updates and lowercase commit messages in sync."""
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+
+def git(*args):
+    return subprocess.check_output(["git", *args])
+
+
+def main():
+    root = Path(git("rev-parse", "--show-toplevel").decode().strip())
+    message_file = Path(sys.argv[1]).resolve()
+    message = message_file.read_text()
+    lines = [line for line in message.splitlines() if not line.startswith("#")]
+    message = "\n".join(lines).strip().lower()
+    if not message:
+        return
+    subject = message.splitlines()[0]
+    date = datetime.now(ZoneInfo("America/Toronto")).strftime("%Y-%m-%d")
+    entry = f"- {date} — {subject}"
+    changes = []
+    for name in ("README.md", "examples/README.md"):
+        path = root / name
+        staged = git("show", f":{name}")
+        if path.read_bytes() != staged:
+            raise ValueError(f"stage or stash your changes to {name} before committing; "
+                             "the update hook will not stage unrelated edits")
+        text = staged.decode()
+        marker = "\n## Updates\n"
+        if marker not in text:
+            text = text.rstrip() + marker + "\n"
+        updates = text.split(marker, 1)[1]
+        if entry not in updates.splitlines():
+            text = text.rstrip() + "\n" + entry + "\n"
+        changes.append((path, text))
+    for path, text in changes:
+        path.write_text(text)
+    subprocess.check_call(["git", "-C", str(root), "add", "--", "README.md", "examples/README.md"])
+    message_file.write_text(message + "\n")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"commit update hook: {error}", file=sys.stderr)
+        sys.exit(1)

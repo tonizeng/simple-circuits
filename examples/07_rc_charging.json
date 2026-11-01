@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "circuit_id": "07_rc_charging",
+  "name": "RC Charging Circuit",
+  "ground_node": "n0",
+  "components": [
+    {
+      "id": "V1",
+      "type": "voltage_source",
+      "parameters": {
+        "voltage_v": 5
+      }
+    },
+    {
+      "id": "R1",
+      "type": "resistor",
+      "parameters": {
+        "resistance_ohm": 10000
+      }
+    },
+    {
+      "id": "C1",
+      "type": "capacitor",
+      "parameters": {
+        "capacitance_f": 0.0001,
+        "initial_voltage_v": 0
+      }
+    }
+  ],
+  "nets": [
+    {
+      "id": "n1",
+      "terminals": [
+        {
+          "component_id": "V1",
+          "terminal": "1"
+        },
+        {
+          "component_id": "R1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "terminals": [
+        {
+          "component_id": "R1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "C1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n0",
+      "terminals": [
+        {
+          "component_id": "C1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "V1",
+          "terminal": "2"
+        }
+      ]
+    }
+  ]
+}
