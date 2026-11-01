@@ -9,7 +9,7 @@ Falstad export supports **all examples**. Component values use base SI units.
 | 02 | voltage divider |
 | 03 | parallel resistors |
 | 04 | switch-controlled LED |
-| 05 | normally open button and LED |
+| 05 | normally open button and LED (held down initially) |
 | 06 | forward-biased diode |
 | 07 | RC charging |
 | 08 | RL step response |
@@ -28,7 +28,8 @@ Or click **View Examples** in the app. Switch/button states come from JSON,
 reflecting the physical circuit. Undetermined results show `—`.
 
 Capacitors are open circuits and inductors are ideal shorts at DC equilibrium;
-initial conditions do not affect that result. Charging waveforms are not computed locally; Falstad runs its own transient simulation.
+initial conditions do not affect that result. Charging waveforms are not computed
+locally; Falstad runs its own transient simulation.
 Potentiometer results use track voltage (1–2) and current entering terminal 1;
 hover over its results for all three terminal currents.
 
@@ -39,9 +40,14 @@ Terminals are `"1"` and `"2"`; potentiometers add `"3"` for the wiper. LEDs use
 Potentiometers export as two track resistors joined at the wiper; photodiodes
 export as a diode in parallel with a photocurrent source. Diode/LED results may
 differ because Falstad uses nonlinear models instead of our fixed-drop model.
+Export currently requires a single-source series/parallel layout and unloaded
+potentiometer wipers. Example text exports are in [artifacts](../artifacts/).
 
-## Updates
+See the [Falstad/CircuitJS credits](../README.md#references) for references.
+
+## updates
 
 - 2026-10-31 — add simple circuits desktop prototype
-- 2026-10-31 — --amend-no-edit
 - 2026-10-31 — add more component types
+- 2026-10-31 — add falstad export support for more component types
+- 2026-10-31 — update read me

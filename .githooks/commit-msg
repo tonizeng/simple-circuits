@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Keep project README updates and lowercase commit messages in sync."""
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -30,12 +31,15 @@ def main():
             raise ValueError(f"stage or stash your changes to {name} before committing; "
                              "the update hook will not stage unrelated edits")
         text = staged.decode()
-        marker = "\n## Updates\n"
-        if marker not in text:
-            text = text.rstrip() + marker + "\n"
-        updates = text.split(marker, 1)[1]
+        heading = re.search(r"^## updates[ \t]*$", text, re.IGNORECASE | re.MULTILINE)
+        if heading is None:
+            raise ValueError(f"add a ## updates section to {name} before committing")
+        following = re.search(r"^#{1,2} ", text[heading.end():], re.MULTILINE)
+        end = heading.end() + following.start() if following else len(text)
+        updates = text[heading.end():end]
         if entry not in updates.splitlines():
-            text = text.rstrip() + "\n" + entry + "\n"
+            section = updates.rstrip() + "\n" + entry + "\n"
+            text = text[:heading.end()] + section + ("\n" if following else "") + text[end:]
         changes.append((path, text))
     for path, text in changes:
         path.write_text(text)
