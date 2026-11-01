@@ -343,7 +343,7 @@ DC equilibrium. Status messages identify that transient behavior is not simulate
 
 Optional exponential LED mode currently rejects circuits also containing ordinary
 diodes or photodiodes; use the default fixed mode for those combinations. Falstad
-export remains limited to examples 1–5; this addition does not change export scope.
+export supports all current component types (see the export section below).
 No schematic interaction can change physical component states.
 
 Model references:
@@ -351,8 +351,10 @@ Model references:
 
 ## Falstad export
 
-Implemented in `falstad.py` for the types in examples 1–5: resistor, DC source,
-LED, switch, and button in a single-source series/parallel network. The UI's
+Implemented in `falstad.py` for every current component type: resistor, DC source,
+LED, diode, switch, button, wire, capacitor, inductor, potentiometer, and photodiode.
+All 11 bundled examples export. Layout still requires a single-source
+series/parallel network; potentiometer wipers must currently be unloaded. The UI's
 Export to Falstad button opens the encoded current circuit in the default
 browser. No local MNA results are needed. CLI supports URL generation and
 `--output PATH` text export; generated examples are under `artifacts/`.
@@ -362,8 +364,20 @@ overlapping segments are deduplicated, and ambiguous cross-net junctions are
 rejected. Voltage-source endpoint order is reversed from our numbered terminal
 convention. LED input uses CircuitJS's compatible explicit-forward-drop syntax.
 Button export preserves current contact position and momentary behavior, but
-does not encode separate pressed/released metadata. Other components/layouts
-produce a clear unsupported message. Export tests verify connectivity, polarity,
+does not encode separate pressed/released metadata. Unsupported layouts
+produce a clear error instead of changing connectivity.
+
+Capacitors export capacitance and initial voltage (including the reset value);
+inductors export inductance and initial current. Missing initial conditions default
+to zero. Explicit wires remain ideal wires. Diodes use the backward-compatible
+explicit-forward-drop record, with terminal 1 as anode and terminal 2 as cathode.
+Potentiometers export as two resistors with a shared wiper: R(1–3) = R × position
+and R(3–2) = R × (1 − position). At exact endpoints the zero-ohm section is a wire.
+This preserves the requested position without a quantized interactive slider.
+Photodiodes export as a diode and parallel current source from cathode to anode,
+using photocurrent_a and optional forward_voltage_v (default 0.7 V).
+Falstad runs nonlinear/transient models independently; numerical results can differ
+from the local fixed-drop DC equilibrium calculation. Export tests verify connectivity, polarity,
 parameters, contact flags, URL encoding, and UI dispatch; live browser execution
 has not been automated.
 

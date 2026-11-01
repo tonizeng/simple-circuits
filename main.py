@@ -370,7 +370,7 @@ class CircuitWindow(QMainWindow):
             self.statusBar().showMessage(str(error))
             return
         if QDesktopServices.openUrl(QUrl(url)):
-            self.statusBar().showMessage("Opened in Falstad. Its exponential LED model may differ from the classroom fixed-drop result.")
+            self.statusBar().showMessage("Opened in Falstad. Its nonlinear and transient results may differ from the local DC model.")
         else:
             self.statusBar().showMessage("Could not open the browser. Use falstad.py --output to save circuit text.")
 

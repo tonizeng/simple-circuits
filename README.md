@@ -18,7 +18,7 @@ On Windows, create the environment with `python` and activate it with
 ## current features
 
 - Eleven circuit examples, vector symbols, component legends, and hover highlights.
-- DC steady-state MNA for all 11 examples; Falstad export for examples 1–5.
+- DC steady-state MNA for all 11 examples; Falstad export for all bundled examples.
 - SQLite example browser; an empty database is seeded automatically.
 - Current magnitude and direction arrows; unknown results display `—`.
 
@@ -50,5 +50,4 @@ README update entries and lowercase commit messages. This checkout is configured
 ## updates
 
 - 2026-10-31 — add simple circuits desktop prototype
-## Updates
 - 2026-10-31 — add more component types
