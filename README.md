@@ -20,7 +20,7 @@ On Windows, create the environment with `python` and activate it with
 ## current features
 
 - Eleven circuit examples, vector symbols, component legends, hover highlights,
-  and a Learn tab explaining results.
+  and Guide/Formulas tabs for reading results and equation references.
 - DC steady-state MNA for all 11 examples; Falstad export for all bundled examples.
 - SQLite circuit library; an empty database is seeded automatically.
 - Current magnitude and direction arrows; unknown results display `—`.
@@ -48,6 +48,16 @@ python -m unittest discover -s tests
 See [examples](examples/README.md) for the circuit list and
 [circuits.md](circuits.md) for schema, solver, and export details.
 
+## equation assets
+
+Formulas use pre-generated SVGs; Matplotlib is not needed to run the app.
+To regenerate them:
+
+```sh
+python -m pip install -r requirements-dev.txt
+python tools/generate_formulas.py
+```
+
 ## commits
 
 Run `git config core.hooksPath .githooks` after cloning to enable automatic
@@ -68,3 +78,4 @@ independently.
 - 2026-10-31 — add falstad export support for more component types
 - 2026-10-31 — update read me
 - 2026-10-31 — update ui
+- 2026-11-01 — ui updates

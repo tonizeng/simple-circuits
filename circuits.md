@@ -434,3 +434,25 @@ The header gear opens colour settings for components (including value glow),
 connected nodes, and current arrows. Save applies and persists these preferences
 using Qt QSettings; Cancel discards edits, and Restore defaults resets the choices
 in the popup. Component value text stays black. This changes presentation only.
+
+## Incomplete circuit layout
+
+Open series/parallel examples retain a rectangular ladder layout. The renderer
+tries temporary rail assignments for dangling terminals to determine component
+positions, then draws their actual nets separately with a 20px gap to the rail.
+These assignments are drawing hints only: input topology, ground, and simulation
+results are not changed. This fallback requires one source and handles up to six
+dangling endpoints; other disconnected networks retain the generic net-lane layout.
+
+## Formula reference
+
+The Formulas sidebar tab uses expandable reference sections with equations, SI
+units, and short usage notes. Content is in `formula_reference.py`; it does not
+perform calculations or provide worked circuit solutions. Capacitor/inductor
+time-dependent equations are educational references, not transient solver support.
+
+Formula equations are pre-generated SVG paths using STIX math typography in
+`assets/formulas/`. `tools/generate_formulas.py` regenerates them using the optional
+`requirements-dev.txt` dependencies. The desktop renders SVGs with Qt, without
+importing Matplotlib or requiring a LaTeX installation. Accessible text accompanies
+each equation; explanations keep the application font.

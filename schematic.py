@@ -1,10 +1,10 @@
 """Vector symbols with rectangular series-loop and fallback net-lane layouts."""
 
-from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainterPath, QPainterPathStroker, QPen, QPolygonF
 from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsDropShadowEffect
 from components import nominal_label, contact_closed, engineering
-from layout import series_parallel_layout
+from layout import series_parallel_layout, open_series_parallel_layout
 
 
 DEFAULT_HIGHLIGHT_COLORS = {"component": "#a2c96e", "node": "#787aaf", "current": "#2878b5"}
@@ -27,6 +27,7 @@ class ResultBox(QGraphicsPathItem):
         self.highlight(False)
 
     def highlight(self, active):
+        active = active or (self.symbol is not None and self.symbol.pinned)
         self.setPen(QPen(highlight_color(self, "component") if active else QColor("#888888"),
                          3 if active else 2))
         fill = QColor("#ffffff")
@@ -37,6 +38,14 @@ class ResultBox(QGraphicsPathItem):
         self.setBrush(fill)
         if self.symbol is not None:
             self.symbol.set_highlight(active)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.symbol is not None:
+                self.symbol.toggle_pin()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
     def hoverEnterEvent(self, event):
         self.highlight(True)
@@ -52,6 +61,11 @@ class NetLabel(QGraphicsSimpleTextItem):
         super().__init__(text)
         self.setFont(font)
         self.net = net
+        self.glow = QGraphicsDropShadowEffect()
+        self.glow.setOffset(0, 0)
+        self.glow.setBlurRadius(10)
+        self.glow.setEnabled(False)
+        self.setGraphicsEffect(self.glow)
         self.setAcceptHoverEvents(True)
 
     def boundingRect(self):
@@ -61,6 +75,13 @@ class NetLabel(QGraphicsSimpleTextItem):
         path = QPainterPath()
         path.addRect(self.boundingRect())
         return path
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.net.toggle_pin()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
     def hoverEnterEvent(self, event):
         self.net.highlight(True)
@@ -76,6 +97,7 @@ class NetWire(QGraphicsPathItem):
 
     def __init__(self, path):
         super().__init__(path)
+        self.pinned = False
         self.label = None
         self.dots = []
         self.setAcceptHoverEvents(True)
@@ -91,13 +113,27 @@ class NetWire(QGraphicsPathItem):
         return self.path().boundingRect().adjusted(-9, -9, 9, 9)
 
     def highlight(self, active):
+        active = active or self.pinned
         color = highlight_color(self, "node") if active else QColor("#555555")
         self.setPen(QPen(color, 3 if active else 1.5))
         if self.label is not None:
-            self.label.setBrush(color if active else QColor("#222222"))
+            self.label.setBrush(QColor("#222222"))
+            self.label.glow.setColor(highlight_color(self, "node"))
+            self.label.glow.setEnabled(active)
         for dot in self.dots:
             dot.setPen(QPen(color, 1.5))
             dot.setBrush(color)
+
+    def toggle_pin(self):
+        self.pinned = not self.pinned
+        self.highlight(self.pinned)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.toggle_pin()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
     def hoverEnterEvent(self, event):
         self.highlight(True)
@@ -135,6 +171,13 @@ class ComponentLabel(QGraphicsSimpleTextItem):
         self.setGraphicsEffect(self.glow)
         self.setAcceptHoverEvents(True)
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.symbol.toggle_pin()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
     def hoverEnterEvent(self, event):
         if self.symbol.result_box is not None:
             self.symbol.result_box.highlight(True)
@@ -157,6 +200,7 @@ class ComponentSymbol(QGraphicsItem):
         super().__init__()
         self.component = component
         self.highlighted = False
+        self.pinned = False
         self.result_box = None
         self.value_label = None
         self.current_a = None
@@ -168,12 +212,27 @@ class ComponentSymbol(QGraphicsItem):
                         + ("\n3: wiper" if component.type == "potentiometer" else ""))
 
     def set_highlight(self, active):
+        active = active or self.pinned
         self.highlighted = active
         if self.value_label is not None:
             self.value_label.setBrush(QColor("#222222"))
             self.value_label.glow.setColor(highlight_color(self, "component"))
             self.value_label.glow.setEnabled(active)
         self.update()
+
+    def toggle_pin(self):
+        self.pinned = not self.pinned
+        if self.result_box is not None:
+            self.result_box.highlight(self.pinned)
+        else:
+            self.set_highlight(self.pinned)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.toggle_pin()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
     def terminal_position(self, terminal):
         return self.mapToScene(self.terminals[terminal])
@@ -379,7 +438,7 @@ def render_circuit(scene, circuit, simulation=None):
     scene.clear()
     symbols = {}
     placements = rectangular_layout(circuit)
-    plan = None if placements else series_parallel_layout(circuit)
+    plan = None if placements else (series_parallel_layout(circuit) or open_series_parallel_layout(circuit))
     if plan is not None:
         placements = plan.placements
     y = 80 + 50 * len(circuit.nets)
@@ -415,7 +474,7 @@ def render_circuit(scene, circuit, simulation=None):
         current = engineering(abs(result.current_a), "A") if result is not None and result.current_a is not None else "—"
         symbol.current_a = result.current_a if result is not None else None
         output = add_label(scene, f"V: {voltage}\nI: {current}", 0, 0)
-        message = simulation.message if simulation is not None else "No simulation results supplied."
+        message = (simulation.message if simulation.status != "solved" else "") if simulation is not None else "No simulation results supplied."
         if result is not None and result.terminal_currents_a is not None:
             message += "\nPotentiometer I is current entering terminal 1; V is across track ends 1 and 2."
             message += "\nTerminal currents: " + ", ".join(
@@ -423,7 +482,7 @@ def render_circuit(scene, circuit, simulation=None):
                 for terminal, current in result.terminal_currents_a.items())
         if result is not None and result.state:
             message += f"\nState: {result.state}"
-        output.setToolTip(message + "\nV = V1 − V2. I displays magnitude; the arrow shows conventional current direction.")
+        output.setToolTip((message + "\nV = V1 − V2. I displays magnitude; the arrow shows conventional current direction.").strip())
         if placements:
             if component.type == "voltage_source":
                 output.setPos(symbol.x() - output.boundingRect().width() - 47,

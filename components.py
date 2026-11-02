@@ -7,6 +7,20 @@ COMPONENT_NAMES = {
     "potentiometer": "Potentiometer",
 }
 
+COMPONENT_DESCRIPTIONS = {
+    "voltage_source": "Maintains a fixed voltage between its positive and negative terminals.",
+    "resistor": "Limits current and creates a voltage drop according to Ohm’s law.",
+    "wire": "Connects terminals so they share the same electrical potential in the ideal model.",
+    "led": "Emits light when forward biased and carrying current.",
+    "diode": "Conducts primarily in one direction and blocks current in the reverse direction under normal conditions.",
+    "switch": "Opens or closes an electrical connection.",
+    "button": "Changes a connection while pressed, then returns to its normal state when released.",
+    "photodiode": "Produces a current in response to light, often while reverse biased.",
+    "capacitor": "Stores energy in an electric field and opposes changes in voltage.",
+    "inductor": "Stores energy in a magnetic field and opposes changes in current.",
+    "potentiometer": "Provides an adjustable resistance using a movable wiper along a resistive track.",
+}
+
 # Required numeric fields and ranges: (minimum, maximum, minimum_is_exclusive).
 NUMERIC_PARAMETERS = {
     "voltage_source": {"voltage_v": (None, None, False)},

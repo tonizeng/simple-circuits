@@ -41,7 +41,7 @@ class RenderingTests(unittest.TestCase):
                 self.assertEqual(sum(isinstance(i, ResultBox) for i in scene.items()), len(circuit.components))
                 for terminal in circuit.terminal_nodes():
                     self.assertIn(terminal[1], symbols[terminal[0]].terminals)
-                self.assertEqual(window.component_legend.rowCount(), len({c.type for c in circuit.components}))
+                self.assertEqual(window.component_legend.rowCount(), 2 * len({c.type for c in circuit.components}))
                 image = QImage(1200, 600, QImage.Format.Format_ARGB32)
                 image.fill(0xffffffff)
                 painter = QPainter(image)

@@ -17,6 +17,23 @@ Falstad export supports **all examples**. Component values use base SI units.
 | 10 | photodiode sensor |
 | 12 | LED circuit with explicit wire |
 
+## incomplete circuits
+
+`incomplete/03_parallel_resistors_incomplete.json` disconnects R2’s return terminal;
+R1 still has a complete path. `incomplete/04_switch_led_incomplete.json` disconnects
+the LED’s return terminal even though the switch is closed. Both are valid topology
+JSON with an unconnected terminal represented by a singleton net.
+
+Load these separately, for example:
+
+```sh
+python main.py examples/incomplete/04_switch_led_incomplete.json
+```
+
+Both also appear in **Circuit Library** after the complete examples. They are
+rendering/diagnostic samples; Falstad export does not support these incomplete
+layouts. Existing library records are preserved when these samples are added.
+
 ## use
 
 ```sh
@@ -52,3 +69,4 @@ See the [Falstad/CircuitJS credits](../README.md#references) for references.
 - 2026-10-31 — add falstad export support for more component types
 - 2026-10-31 — update read me
 - 2026-10-31 — update ui
+- 2026-11-01 — ui updates

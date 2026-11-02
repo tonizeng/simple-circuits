@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "circuit_id": "04_switch_led_incomplete",
+  "name": "Switch LED \u2014 Broken Return Connection",
+  "ground_node": "n0",
+  "components": [
+    {
+      "id": "V1",
+      "type": "voltage_source",
+      "parameters": {
+        "voltage_v": 5
+      }
+    },
+    {
+      "id": "S1",
+      "type": "switch",
+      "parameters": {
+        "closed": true
+      }
+    },
+    {
+      "id": "R1",
+      "type": "resistor",
+      "parameters": {
+        "resistance_ohm": 330
+      }
+    },
+    {
+      "id": "LED1",
+      "type": "led",
+      "parameters": {
+        "forward_voltage_v": 2
+      }
+    }
+  ],
+  "nets": [
+    {
+      "id": "n1",
+      "terminals": [
+        {
+          "component_id": "V1",
+          "terminal": "1"
+        },
+        {
+          "component_id": "S1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "terminals": [
+        {
+          "component_id": "S1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "R1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "terminals": [
+        {
+          "component_id": "R1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "LED1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n0",
+      "terminals": [
+        {
+          "component_id": "V1",
+          "terminal": "2"
+        }
+      ]
+    },
+    {
+      "id": "n_open",
+      "terminals": [
+        {
+          "component_id": "LED1",
+          "terminal": "2"
+        }
+      ]
+    }
+  ],
+  "description": "LED1 terminal 2 is disconnected from n0. The switch is closed, but the return path is broken."
+}

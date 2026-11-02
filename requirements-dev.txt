@@ -1,0 +1,2 @@
+# Optional: regenerate assets/formulas/*.svg
+matplotlib>=3.9,<4

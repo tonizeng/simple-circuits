@@ -8,11 +8,13 @@ from pathlib import Path
 from dataclasses import replace
 
 from PySide6.QtCore import Qt, QSize, QRectF, QUrl, QPoint, QSettings
-from PySide6.QtGui import QFont, QFontDatabase, QPainter, QPixmap, QDesktopServices, QColor
+from PySide6.QtSvgWidgets import QSvgWidget
+from PySide6.QtGui import QFont, QFontDatabase, QPainter, QPixmap, QDesktopServices, QColor, QIcon
 from topology import parse_topology, TopologyError
 from schematic import render_circuit, ComponentSymbol, DEFAULT_HIGHLIGHT_COLORS
-from components import COMPONENT_NAMES
+from components import COMPONENT_NAMES, COMPONENT_DESCRIPTIONS
 from database import CircuitDatabase
+from formula_reference import FORMULA_TOPICS, FORMULA_EQUATIONS, FORMULA_CAPTIONS
 from simulation import solve_dc
 from falstad import falstad_url, FalstadExportError
 from PySide6.QtWidgets import (
@@ -21,6 +23,167 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QDialog, QListWidget, QDialogButtonBox, QScrollArea, QTabWidget, QColorDialog, QFormLayout,
 )
+
+
+class GuideSection(QFrame):
+    """A keyboard-accessible guide topic with a collapsible explanation."""
+
+    def __init__(self, title, text, equations=()):
+        super().__init__()
+        self.setObjectName("guideSection")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.toggle = QPushButton("▸ " + title)
+        self.toggle.setObjectName("guideDisclosure")
+        self.toggle.setCheckable(True)
+        self.toggle.setAccessibleName(title)
+        if equations:
+            self.explanation = QWidget()
+            content = QVBoxLayout(self.explanation)
+            content.setContentsMargins(10, 12, 10, 12)
+            content.setSpacing(12)
+            for name, _, accessible_text in equations:
+                if name in FORMULA_CAPTIONS:
+                    content.addWidget(QLabel(FORMULA_CAPTIONS[name]))
+                path = Path(__file__).resolve().parent / "assets" / "formulas" / (name + ".svg")
+                equation_widget = QSvgWidget(str(path))
+                if not equation_widget.renderer().isValid():
+                    raise RuntimeError(f"Could not load formula: {path}")
+                native = equation_widget.renderer().defaultSize()
+                scale = min(1.0, 180 / max(1, native.width()))
+                equation_widget.setFixedSize(round(native.width() * scale), round(native.height() * scale))
+                equation_widget.setAccessibleName(accessible_text)
+                equation_widget.setStyleSheet("background: transparent;")
+                content.addWidget(equation_widget, 0, Qt.AlignmentFlag.AlignLeft)
+            notes = QLabel(text)
+            notes.setWordWrap(True)
+            notes.setTextFormat(Qt.TextFormat.RichText)
+            content.addWidget(notes)
+        else:
+            self.explanation = QLabel(text)
+            self.explanation.setWordWrap(True)
+            self.explanation.setTextFormat(Qt.TextFormat.RichText)
+            self.explanation.setContentsMargins(10, 10, 10, 12)
+        self.explanation.hide()
+        layout.addWidget(self.toggle)
+        layout.addWidget(self.explanation)
+        def expand(checked):
+            self.toggle.setText(("▾ " if checked else "▸ ") + title)
+            self.explanation.setVisible(checked)
+        self.toggle.toggled.connect(expand)
+
+
+class ComponentRowButton(QPushButton):
+    """Share hover styling across both cells of a component row."""
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self.row_buttons = []
+
+    def set_row_hover(self, active):
+        for button in self.row_buttons:
+            button.setProperty("rowHovered", active)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        self.set_row_hover(True)
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.set_row_hover(False)
+
+
+class SchematicView(QGraphicsView):
+    """Canvas-only zoom, with cursor anchoring and middle-button panning."""
+
+    def __init__(self, scene):
+        super().__init__(scene)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        self.pan_position = None
+        self.zoom_controls = QFrame(self.viewport())
+        controls = QHBoxLayout(self.zoom_controls)
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(4)
+        for text, tip, callback in (
+            ("−", "Zoom out (−)", lambda: self.zoom_by(1 / 1.2)),
+            ("+", "Zoom in (+)", lambda: self.zoom_by(1.2)),
+            ("Fit", "Fit circuit (0)", self.fit_circuit),
+        ):
+            button = QPushButton(text)
+            button.setToolTip(tip)
+            button.setAccessibleName(tip)
+            button.setStyleSheet("padding: 4px 8px; font-size: 14px;")
+            button.clicked.connect(callback)
+            controls.addWidget(button)
+        self.zoom_controls.adjustSize()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "zoom_controls"):
+            self.zoom_controls.move(max(8, self.viewport().width() - self.zoom_controls.width() - 10), 10)
+            self.zoom_controls.raise_()
+
+    def zoom_by(self, factor, position=None):
+        current = self.transform().m11()
+        target = max(0.05, min(8.0, current * factor))
+        position = position if position is not None else self.viewport().rect().center()
+        before = self.mapToScene(position)
+        self.scale(target / current, target / current)
+        after = self.mapToScene(position)
+        delta = after - before
+        self.translate(delta.x(), delta.y())
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y() or event.pixelDelta().y()
+        if delta:
+            self.zoom_by(1.2 ** (max(-600, min(600, delta)) / 120), event.position().toPoint())
+        event.accept()
+
+    def fit_circuit(self):
+        if self.scene().items():
+            self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+            self.centerOn(self.scene().sceneRect().center())
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self.zoom_by(1.2)
+        elif event.key() == Qt.Key.Key_Minus:
+            self.zoom_by(1 / 1.2)
+        elif event.key() == Qt.Key.Key_0:
+            self.fit_circuit()
+        else:
+            super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.pan_position = event.position().toPoint()
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.pan_position is not None:
+            position = event.position().toPoint()
+            delta = position - self.pan_position
+            self.pan_position = position
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.pan_position = None
+            self.viewport().unsetCursor()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
 
 class LogoWidget(QWidget):
@@ -176,7 +339,8 @@ class CircuitWindow(QMainWindow):
 
         self.component_legend = QTableWidget(0, 2)
         self.component_legend.setAccessibleName("Circuit component legend")
-        self.component_legend.setHorizontalHeaderLabels(["Symbol", "Name"])
+        self.component_legend.setHorizontalHeaderLabels(["Name", "Symbol"])
+        self.component_legend.setShowGrid(True)
         self.component_legend.setIconSize(QSize(100, 56))
         self.component_legend.verticalHeader().hide()
         self.component_legend.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -200,50 +364,37 @@ class CircuitWindow(QMainWindow):
         components_layout.setContentsMargins(14, 14, 14, 14)
         components_layout.addWidget(self.component_legend)
         components_layout.addStretch(1)
-        self.sidebar_tabs.addTab(components_page, "Components")
+        components_scroll = QScrollArea()
+        components_scroll.setObjectName("componentsScroll")
+        components_scroll.setWidgetResizable(True)
+        components_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        components_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        components_scroll.setWidget(components_page)
+        self.sidebar_tabs.addTab(components_scroll, "Components")
         panel_layout.addWidget(self.sidebar_tabs, 1)
         reading_box = QFrame()
         reading_box.setObjectName("readingBox")
         reading_layout = QVBoxLayout(reading_box)
         reading_layout.setContentsMargins(18, 18, 18, 18)
         reading_layout.setSpacing(16)
-        self.reading_guide = QLabel(
-            '<p style="margin-top: 0; margin-bottom: 6px;"><b>Current</b></p>'
-            '<p style="margin-top: 0; margin-bottom: 20px;">Arrows indicate conventional '
-            'current direction. The displayed current is its magnitude, in amperes (A).</p>'
-            '<p style="margin-top: 0; margin-bottom: 6px;"><b>Voltage</b></p>'
-            '<p style="margin-top: 0; margin-bottom: 10px;">Voltage is measured from '
-            'terminal 1 to terminal 2:</p>'
-            '<p style="margin-top: 0; margin-bottom: 10px;">V = V(1) − V(2)</p>'
-            '<p style="margin-top: 0; margin-bottom: 20px;">A positive value means terminal 1 '
-            'is at a higher potential; a negative value means terminal 2 is higher.</p>'
-            '<p style="margin-top: 0; margin-bottom: 6px;"><b>Ground reference</b></p>'
-            '<p style="margin-top: 0; margin-bottom: 20px;">Ground is the node chosen as 0 V. '
-            'All node voltages are measured relative to it; component voltages are the '
-            'difference between their terminal voltages. Ground is a reference, not '
-            'necessarily a connection to earth. This app uses the specified ground node, '
-            'or the negative terminal of the DC source when there is exactly one source.</p>'
-            '<p style="margin-top: 0; margin-bottom: 6px;"><b>How the circuit is solved</b></p>'
-            '<p style="margin-top: 0; margin-bottom: 10px;">The app uses Modified Nodal '
-            'Analysis (MNA). It combines current balance at each node with component '
-            'equations, such as Ohm’s law, into a system of equations. Solving that '
-            'system gives node voltages and component currents.</p>'
-            '<p style="margin-top: 0; margin-bottom: 10px;">LEDs and diodes use a fixed '
-            'forward-voltage model by default. The solver checks conducting and '
-            'non-conducting states to find a consistent solution. Switch and button '
-            'states come from the circuit data.</p>'
-            '<p style="margin-top: 0; margin-bottom: 20px;">Results describe DC steady '
-            'state, after changes have settled. Ideal capacitors act as open circuits '
-            'and ideal inductors as short circuits. Changes over time are not simulated.</p>'
-            '<p style="margin-top: 0; margin-bottom: 6px;"><b>Unavailable results</b></p>'
-            '<p style="margin-top: 0; margin-bottom: 0;">A dash (—) indicates that a result '
-            'cannot be determined.</p>'
-        )
+        self.reading_guide = QWidget()
         self.reading_guide.setObjectName("readingGuide")
-        self.reading_guide.setTextFormat(Qt.TextFormat.RichText)
-        self.reading_guide.setWordWrap(True)
-        self.reading_guide.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.reading_guide.setAccessibleName("Circuit guide for the schematic")
+        guide_layout = QVBoxLayout(self.reading_guide)
+        guide_layout.setContentsMargins(0, 0, 0, 0)
+        guide_layout.setSpacing(8)
+        self.guide_sections = []
+        topics = (
+            ('Current and direction', '<p style="margin-top: 0; margin-bottom: 20px;">Arrows indicate conventional current direction. The displayed current is its magnitude, in amperes (A).</p>'),
+            ('Voltage and polarity', '<p style="margin-top: 0; margin-bottom: 10px;">Voltage is measured from terminal 1 to terminal 2:</p><p style="margin-top: 0; margin-bottom: 10px;">V = V(1) − V(2)</p><p style="margin-top: 0; margin-bottom: 20px;">A positive value means terminal 1 is at a higher potential; a negative value means terminal 2 is higher.</p>'),
+            ('Ground reference', '<p style="margin-top: 0; margin-bottom: 20px;">Ground is the node chosen as 0 V. All node voltages are measured relative to it; component voltages are the difference between their terminal voltages. Ground is a reference, not necessarily a connection to earth. This app uses the specified ground node, or the negative terminal of the DC source when there is exactly one source.</p>'),
+            ('How calculations work', '<p style="margin-top: 0; margin-bottom: 10px;">The app uses Modified Nodal Analysis (MNA). It combines current balance at each node with component equations, such as Ohm’s law, into a system of equations. Solving that system gives node voltages and component currents.</p><p style="margin-top: 0; margin-bottom: 10px;">LEDs and diodes use a fixed forward-voltage model by default. The solver checks conducting and non-conducting states to find a consistent solution. Switch and button states come from the circuit data.</p><p style="margin-top: 0; margin-bottom: 20px;">Results describe DC steady state, after changes have settled. Ideal capacitors act as open circuits and ideal inductors as short circuits. Changes over time are not simulated.</p>'),
+            ('Unavailable results', '<p style="margin-top: 0; margin-bottom: 0;">A dash (—) indicates that a result cannot be determined.</p>'),
+        )
+        for title, text in topics:
+            section = GuideSection(title, text)
+            self.guide_sections.append(section)
+            guide_layout.addWidget(section)
+        guide_layout.addStretch(1)
         self.reading_scroll = QScrollArea()
         self.reading_scroll.setObjectName("readingScroll")
         self.reading_scroll.setWidgetResizable(True)
@@ -252,12 +403,30 @@ class CircuitWindow(QMainWindow):
         self.reading_scroll.setMinimumHeight(80)
         self.reading_scroll.setWidget(self.reading_guide)
         reading_layout.addWidget(self.reading_scroll, 1)
-        self.sidebar_tabs.addTab(reading_box, "Learn")
+        self.sidebar_tabs.addTab(reading_box, "Guide")
+        formulas_page = QWidget()
+        formulas_page.setObjectName("formulasPage")
+        formulas_layout = QVBoxLayout(formulas_page)
+        formulas_layout.setContentsMargins(18, 18, 18, 18)
+        formulas_layout.setSpacing(8)
+        self.formula_sections = []
+        for title, text in FORMULA_TOPICS:
+            section = GuideSection(title, text, FORMULA_EQUATIONS[title])
+            self.formula_sections.append(section)
+            formulas_layout.addWidget(section)
+        formulas_layout.addStretch(1)
+        self.formulas_scroll = QScrollArea()
+        self.formulas_scroll.setObjectName("formulasScroll")
+        self.formulas_scroll.setWidgetResizable(True)
+        self.formulas_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.formulas_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.formulas_scroll.setWidget(formulas_page)
+        self.sidebar_tabs.addTab(self.formulas_scroll, "Formulas")
         body.addWidget(panel)
 
         self.scene = QGraphicsScene(self)
         self.scene.setProperty("highlightColors", self.highlight_colors)
-        self.canvas = QGraphicsView(self.scene)
+        self.canvas = SchematicView(self.scene)
         self.canvas.setObjectName("schematicCanvas")
         self.canvas.setAccessibleName("Circuit schematic canvas")
         self.canvas.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -279,6 +448,14 @@ class CircuitWindow(QMainWindow):
             QFrame#header, QFrame#controlPanel { background: #d9d9d9; }
             QFrame#controlPanel { border: 1px solid #a8a8a8; }
             QLabel { background: transparent; }
+            QToolTip {
+                background-color: #ffffff;
+                color: #222222;
+                font-size: 12px;
+                border: 1px solid #c6c6c6;
+                padding: 5px 7px;
+            }
+            QScrollArea#componentsScroll, QScrollArea#componentsScroll > QWidget { background: #d9d9d9; border: none; }
             QFrame#readingBox { background: #d9d9d9; border: none; }
             QTabWidget#sidebarTabs::pane { border: none; border-top: 1px solid #a8a8a8; background: #d9d9d9; }
             QTabWidget#sidebarTabs > QWidget, QWidget#componentsPage { background: #d9d9d9; }
@@ -286,7 +463,7 @@ class CircuitWindow(QMainWindow):
             QTabBar::tab {
                 background: #d9d9d9;
                 color: #555555;
-                padding: 9px 12px;
+                padding: 9px 8px;
                 border: none;
                 border-bottom: 2px solid transparent;
                 font-size: 14px;
@@ -298,32 +475,52 @@ class CircuitWindow(QMainWindow):
                 border-bottom: 2px solid #787aaf;
                 font-weight: bold;
             }
-            QLabel#readingGuide { font-size: 14px; background: #d9d9d9; }
+            QWidget#readingGuide, QWidget#formulasPage { background: #d9d9d9; }
+            QScrollArea#formulasScroll, QScrollArea#formulasScroll > QWidget { background: #d9d9d9; border: none; }
+            QFrame#guideSection { background: #f5f5f5; border: none; }
+            QPushButton#guideDisclosure {
+                text-align: left; padding: 10px 8px; background: #e8e8e8;
+                border: none; border-bottom: 1px solid #c6c6c6; font-size: 14px;
+            }
+            QPushButton#guideDisclosure:hover { background: #f1f1f1; }
+            QPushButton#guideDisclosure:checked { background: #f1f1f1; font-weight: bold; }
+            QPushButton#guideDisclosure:focus { border: 1px solid #a8a8a8; }
             QScrollArea#readingScroll, QScrollArea#readingScroll > QWidget { background: #d9d9d9; border: none; }
-            QScrollArea#readingScroll QScrollBar:vertical {
+            QScrollArea QScrollBar:vertical {
                 background: transparent;
                 width: 6px;
                 margin: 0;
             }
-            QScrollArea#readingScroll QScrollBar::handle:vertical {
+            QScrollArea QScrollBar::handle:vertical {
                 background: #b0b0b0;
                 border-radius: 3px;
                 min-height: 24px;
             }
-            QScrollArea#readingScroll QScrollBar::handle:vertical:hover {
+            QScrollArea QScrollBar::handle:vertical:hover {
                 background: #888888;
             }
-            QScrollArea#readingScroll QScrollBar::add-line:vertical,
-            QScrollArea#readingScroll QScrollBar::sub-line:vertical {
+            QScrollArea QScrollBar::add-line:vertical,
+            QScrollArea QScrollBar::sub-line:vertical {
                 height: 0;
                 border: none;
                 background: transparent;
             }
-            QScrollArea#readingScroll QScrollBar::add-page:vertical,
-            QScrollArea#readingScroll QScrollBar::sub-page:vertical {
+            QScrollArea QScrollBar::add-page:vertical,
+            QScrollArea QScrollBar::sub-page:vertical {
                 background: transparent;
             }
             QFrame#header > QWidget { background: transparent; }
+            QPushButton#componentDisclosure {
+                background: transparent; border: none; padding: 0;
+                text-align: center; font-size: 14px;
+            }
+            QPushButton#componentDisclosure[rowHovered="true"] { background: #f3f3f3; }
+            QPushButton#componentDisclosure:checked { font-weight: bold; }
+            QPushButton#componentDisclosure[expanded="true"],
+            QPushButton#componentDisclosure[expanded="true"]:hover {
+                background: #e8e8e8;
+            }
+            QPushButton#componentDisclosure:focus { border: none; }
             QTableWidget {
                 background: #ffffff;
                 font-size: 14px;
@@ -395,22 +592,26 @@ class CircuitWindow(QMainWindow):
         display_circuit = (replace(circuit, ground_node=self.simulation_result.ground_node)
                            if self.simulation_result.ground_node is not None else circuit)
         render_circuit(self.scene, display_circuit, self.simulation_result)
-        self.statusBar().showMessage(self.simulation_result.message)
+        self.statusBar().showMessage(
+            "" if self.simulation_result.status == "solved" else self.simulation_result.message
+        )
         self.statusBar().setToolTip("V = V1 − V2. Current displays magnitude; arrows indicate conventional current direction.")
         self.circuit = circuit
         names = COMPONENT_NAMES
         types = {}
         for component in circuit.components:
             types.setdefault(component.type, component)
-        # Replaced cell widgets are deleted later by Qt; hide them immediately
-        # so switching examples cannot briefly draw old symbols over new ones.
+        # Hide replaced widgets before Qt deletes them on the next event cycle.
         for row in range(self.component_legend.rowCount()):
-            previous = self.component_legend.cellWidget(row, 0)
-            if previous is not None:
-                previous.hide()
+            for column in range(2):
+                previous = self.component_legend.cellWidget(row, column)
+                if previous is not None:
+                    previous.hide()
         self.component_legend.clearContents()
-        self.component_legend.setRowCount(len(types))
-        for row, component in enumerate(types.values()):
+        self.component_legend.clearSpans()
+        self.component_legend.setRowCount(2 * len(types))
+        for index, component in enumerate(types.values()):
+            row = 2 * index
             icon_scene = QGraphicsScene()
             icon_scene.addItem(ComponentSymbol(component))
             # Render vectors at display density instead of enlarging a small bitmap.
@@ -425,23 +626,33 @@ class CircuitWindow(QMainWindow):
             else:
                 icon_scene.render(painter, QRectF(5.2, 0, 89.6, 56), QRectF(-64, -40, 128, 80))
             painter.end()
-            symbol_item = QTableWidgetItem("")
-            symbol_item.setToolTip(names[component.type])
-            self.component_legend.setItem(row, 0, symbol_item)
-            symbol_label = QLabel()
-            symbol_label.setPixmap(pixmap)
-            symbol_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            symbol_label.setToolTip(names[component.type])
-            self.component_legend.setCellWidget(row, 0, symbol_label)
-            name_item = QTableWidgetItem(names[component.type])
-            name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.component_legend.setItem(row, 1, name_item)
+            toggle = ComponentRowButton("▸ " + names[component.type])
+            toggle.setObjectName("componentDisclosure")
+            toggle.setCheckable(True)
+            toggle.setAccessibleName("About " + names[component.type])
+            icon_button = ComponentRowButton()
+            toggle.row_buttons = icon_button.row_buttons = [toggle, icon_button]
+            icon_button.setObjectName("componentDisclosure")
+            icon_button.setIcon(QIcon(pixmap))
+            icon_button.setIconSize(QSize(100, 56))
+            icon_button.setAccessibleName("About " + names[component.type] + " symbol")
+            icon_button.clicked.connect(toggle.click)
+            description = QLabel(COMPONENT_DESCRIPTIONS[component.type])
+            description.setWordWrap(True)
+            description.setContentsMargins(12, 10, 12, 12)
+            description.setStyleSheet("background: #f5f5f5;")
+            self.component_legend.setCellWidget(row, 0, toggle)
+            self.component_legend.setCellWidget(row, 1, icon_button)
+            self.component_legend.setSpan(row + 1, 0, 1, 2)
+            self.component_legend.setCellWidget(row + 1, 0, description)
             self.component_legend.setRowHeight(row, 64)
-        self.component_legend.setFixedHeight(
-            self.component_legend.horizontalHeader().height()
-            + sum(self.component_legend.rowHeight(row) for row in range(len(types)))
-            + 2  # Top and bottom borders.
-        )
+            self.component_legend.setRowHidden(row, False)
+            self.component_legend.setRowHidden(row + 1, True)
+            toggle.toggled.connect(
+                lambda expanded, row=row + 1, label=description, button=toggle, name=names[component.type]:
+                    self.toggle_component_description(row, label, button, name, expanded)
+            )
+        self.resize_component_legend()
         self.circuit_name.setText(circuit.name)
         if preserve_view:
             self.canvas.setTransform(transform)
@@ -454,6 +665,27 @@ class CircuitWindow(QMainWindow):
                 self.canvas.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
             self.canvas.centerOn(self.scene.sceneRect().center())
         return True
+
+    def resize_component_legend(self):
+        self.component_legend.setFixedHeight(
+            self.component_legend.horizontalHeader().height()
+            + sum(self.component_legend.rowHeight(row)
+                  for row in range(self.component_legend.rowCount())
+                  if not self.component_legend.isRowHidden(row)) + 2
+        )
+
+    def toggle_component_description(self, row, label, button, name, expanded):
+        for column in range(2):
+            cell = self.component_legend.cellWidget(row - 1, column)
+            cell.setProperty("expanded", expanded)
+            cell.style().unpolish(cell)
+            cell.style().polish(cell)
+            cell.update()
+        button.setText(("▾ " if expanded else "▸ ") + name)
+        width = max(100, self.component_legend.viewport().width())
+        self.component_legend.setRowHeight(row, max(40, label.heightForWidth(width)))
+        self.component_legend.setRowHidden(row, not expanded)
+        self.resize_component_legend()
 
     def show_settings(self):
         dialog = QDialog(self)
@@ -538,13 +770,19 @@ class CircuitWindow(QMainWindow):
             if not names:
                 self.database.import_folder(Path(__file__).resolve().parent / "examples")
                 names = self.database.list_names()
+            # Add diagnostic examples to existing libraries without overwriting records.
+            for path in sorted((Path(__file__).resolve().parent / "examples" / "incomplete").glob("*.json")):
+                data = json.loads(path.read_bytes())
+                if data["name"] not in names:
+                    self.database.save(data)
+                    names.append(data["name"])
         except (OSError, sqlite3.Error, ValueError) as error:
             QMessageBox.warning(self, "Cannot open circuit library", str(error))
             return
 
         # Use bundled file order for known examples; other database records follow.
         example_order = {}
-        for path in sorted((Path(__file__).resolve().parent / "examples").glob("*.json")):
+        for path in sorted((Path(__file__).resolve().parent / "examples").rglob("*.json")):
             try:
                 name = json.loads(path.read_bytes())["name"]
             except (OSError, ValueError, KeyError, TypeError):

@@ -172,3 +172,64 @@ def series_parallel_layout(circuit):
     plan.route(start, (source_x, top + height / 2 - 60), (source_x, top), (load_x, top))
     plan.route(end, (source_x, top + height / 2 + 60), (source_x, top + height), (load_x, top + height))
     return plan
+
+
+def open_series_parallel_layout(circuit):
+    """Arrange dangling branches as ladders, leaving a visible gap to the rail.
+
+    Temporary endpoint assignments determine positions only. Actual nets and the
+    solver input are never merged; each dangling wire keeps its original net ID.
+    """
+    from dataclasses import replace
+    from itertools import product
+
+    sources = [c for c in circuit.components if c.type == "voltage_source"]
+    if len(sources) != 1:
+        return None
+    source = sources[0]
+    nodes = circuit.terminal_nodes()
+    start, end = nodes[(source.id, "1")], nodes[(source.id, "2")]
+    if start == end:
+        return None
+    dangling = [net for net in circuit.nets if len(net.terminals) == 1
+                and net.terminals[0].component_id != source.id
+                and net.terminals[0].terminal != "3"
+                and net.id not in (start, end)]
+    if not dangling or len(dangling) > 6:
+        return None
+    for targets in product((end, start), repeat=len(dangling)):
+        assignments = dict(zip((net.id for net in dangling), targets))
+        merged = {}
+        for net in circuit.nets:
+            merged.setdefault(assignments.get(net.id, net.id), []).extend(net.terminals)
+        template = circuit.nets[0]
+        virtual = replace(circuit, nets=tuple(replace(template, id=nid, terminals=tuple(refs))
+                                              for nid, refs in merged.items()))
+        plan = series_parallel_layout(virtual)
+        if plan is None:
+            continue
+        valid = True
+        for net, target in zip(dangling, targets):
+            ref = net.terminals[0]
+            x, y, rotation = plan.placements[ref.component_id]
+            dx, dy = (-60, 0) if ref.terminal == "1" else (60, 0)
+            for _ in range(int(rotation) % 360 // 90):
+                dx, dy = -dy, dx
+            terminal = (x + dx, y + dy)
+            route = next((route for route in plan.routes[target]
+                          if len(route) == 2 and terminal in route), None)
+            if route is None:
+                valid = False
+                break
+            rail = route[1] if route[0] == terminal else route[0]
+            distance = abs(rail[0] - terminal[0]) + abs(rail[1] - terminal[1])
+            if distance <= 24:
+                valid = False
+                break
+            tip = (rail[0] + (terminal[0] - rail[0]) * 20 / distance,
+                   rail[1] + (terminal[1] - rail[1]) * 20 / distance)
+            plan.routes[target].remove(route)
+            plan.route(net.id, terminal, tip)
+        if valid:
+            return plan
+    return None
