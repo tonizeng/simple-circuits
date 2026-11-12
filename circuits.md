@@ -53,7 +53,7 @@ LEDs and ordinary diodes are separate types; ordinary diode rendering is support
 
 ## Internal JSON example
 
-Series circuit: 5 V source → 330 Ω resistor → LED → source negative.
+Series circuit: 3.3 V source → 330 Ω resistor → LED → source negative.
 This is the format accepted by the current parser. Hardware framing and the
 adapter remain pending controller integration.
 
@@ -67,7 +67,7 @@ adapter remain pending controller integration.
     {
       "id": "V1",
       "type": "voltage_source",
-      "parameters": { "voltage_v": 5.0 }
+      "parameters": { "voltage_v": 3.3 }
     },
     {
       "id": "R1",
@@ -118,8 +118,8 @@ The selected net retains its original ID and remains in `nets`; only its voltage
 unknown is omitted from the MNA system. MNA handles floating voltage sources
 using extra current unknowns and voltage constraints without explicit supernodes.
 With the optional Falstad-compatible exponential model, example 1 gives about
-9.8157 mA and LED voltage 1.7608 V. The default fixed-drop model gives
-`(5 - 2) / 330 ≈ 9.1 mA`. These are model predictions, not measured results.
+4.7771 mA and LED voltage 1.7236 V. The default fixed-drop model gives
+`(3.3 - 2) / 330 ≈ 3.94 mA`. These are model predictions, not measured results.
 
 ## Planned processing
 
@@ -256,7 +256,7 @@ resistance or arbitrary voltages. Any numerical regularization must be a
 separate, documented modeling choice.
 
 Test analytical expectations before UI integration: LED current approximately
-9.8157 mA with exponential LEDs (9.09 mA in fixed mode) in example 1; 2.5 V divider midpoint in example 2; separate parallel
+4.7771 mA with exponential LEDs (3.94 mA in fixed mode) in example 1; 1.65 V divider midpoint in example 2; separate parallel
 branch currents in example 3; open/closed states in example 4; pressed/released
 behavior in example 5. Also test reversed LEDs, shorts, floating nodes, and
 inconsistent ideal sources. Replace `—` in result boxes only with actual valid
@@ -456,3 +456,101 @@ Formula equations are pre-generated SVG paths using STIX math typography in
 `requirements-dev.txt` dependencies. The desktop renders SVGs with Qt, without
 importing Matplotlib or requiring a LaTeX installation. Accessible text accompanies
 each equation; explanations keep the application font.
+
+## Pre-power validation and fault protection
+
+Hardware ceilings supplied by the project: **3.3 V maximum and 1.5 A maximum**.
+The battery is nominally 3.3 V and fluctuates. Fresh measured upstream battery
+voltage replaces the source value in the analysis copy, without changing the
+stored nominal topology. A measured voltage above 3.3 V denies authorization;
+if 3.3 V is later defined as nominal rather than an absolute ceiling, the maximum
+must be revised using the actual hardware specification.
+
+`circuit_safety.py` checks a validated Circuit before power authorization:
+- Exactly one DC source, source voltage ceiling, and determined DC solution.
+- Supply shorts through nets, ideal wires, closed switches/buttons, inductors at
+  DC, or a potentiometer’s zero-resistance endpoint.
+- Unconnected terminals (an unloaded potentiometer wiper is allowed).
+- Predicted absolute supply current against 1.5 A.
+- Optional per-component parameters `max_current_a`, `max_voltage_v`, and
+  `max_power_w`. Unspecified ratings are not guessed or certified by these checks.
+- Assess settled DC conditions only for now: capacitors are open circuits and
+  inductors are ideal shorts. Their presence alone does not block approval.
+  Startup/inrush and turn-off behaviour are outside these checks; firmware/hardware
+  must provide live current monitoring and fault protection.
+
+`power_protection.py` now replies to **board-initiated enable requests**:
+1. The physical board enable button triggers a request for validation.
+2. The desktop checks the latest board topology, fresh battery/load-current
+   measurements, and the 3.3 V / 1.5 A ceilings.
+3. It returns a PowerDecision with the matching request ID and topology revision,
+   approval/denial, reasons, and the required maximum voltage/current.
+4. Firmware applies its local current limit and enables the load only if it accepts
+   a matching, timely, one-use approval. A denial or no reply must leave power off.
+5. Firmware/hardware independently performs automatic fault shutdown, current
+   limiting, fault latching/reset, and communication-loss handling. The desktop
+   sends no power-on/off, current-limit, or fault-reset commands.
+
+Desktop decisions do not assert the physical power state. No power buttons or
+Safety details button appear in the desktop. Instead, a draggable floating panel inside the schematic
+shows orange/red **Error!** and yellow **Warning!** cards with grey message bodies.
+Shorts, invalid data, and exceeded limits are errors. Unconnected terminals,
+and partially determined solutions are warnings.
+Both severities currently deny power; warnings indicate incomplete validation,
+not permission to energize an uncertain circuit. Open paths identify component
+IDs, terminal numbers, and net IDs; physical board coordinates are not yet known.
+The panel appears automatically when issues are found. Drag a coloured Error/Warning header to
+move the cards within the schematic viewport; it does not resize the schematic or open
+a separate window. It stays within the viewport when the app resizes, retains its
+position while dragging, resets to the top-left for new alerts or circuit loads,
+and disappears when issues resolve. Card height grows with the text; there are
+no internal scrollbars. Only the cards
+are visible; there is no extra title block or white container.
+There is no Close button to dismiss before interacting with the schematic.
+
+Future firmware adapter entry points in CircuitWindow (call on the UI thread):
+- `attach_power_transport(sender)`: sender accepts a PowerDecision response.
+  Attaching emits no command and requires a new board snapshot and measurements.
+- `receive_hardware_topology(data, revision)`: increasing nonnegative revision
+  per device connection. Library/sample loads have no hardware revision and can
+  never authorize the board. Invalid or outdated data denies requests while
+  preserving the previous drawing.
+- `receive_supply_measurement(voltage_v, current_a)`: fresh upstream battery voltage
+  and load-output current, in SI units. Do not replay cached telemetry as new data.
+  The default freshness window is 1 second and remains to be agreed with firmware.
+- `handle_enable_request(request_id, topology_revision)`: explicitly revalidates and
+  responds only to this request. Missing, stale, duplicate, mismatched, or unsafe
+  requests are denied. Decisions never automatically enable or restart anything.
+- `receive_firmware_fault(message)`: show a board-reported fault; None reports that
+  firmware has cleared it. Desktop controls cannot reset the board fault.
+- `disconnect_power_transport()`: discard connection context and deny requests.
+
+The serial adapter and wire format remain pending. Firmware must bind requests,
+topology revisions, and replies to its current device session, impose its own
+response deadline, and consume each approval once. Changing connections/values
+invalidates any prior approval. The app neither guarantees shutdown timing nor
+confirms physical cutoff: firmware must protect the circuit even if USB or the app
+fails. A 1.5 A supply limit alone does not protect lower-rated components.
+All bundled sources, including the root and incomplete examples, use 3.3 V.
+Library migration updates exact unmodified legacy 5 V records; custom records
+are preserved. Falstad text exports match the 3.3 V examples.
+Hardware enforcement is not integrated or hardware-tested yet.
+
+### Locating diagnostic issues
+
+Affected components show a red circular error badge or amber triangular warning
+badge, separate from hover/pinned highlight colours. Hovering the badge shows its
+messages; the error/warning cards remain visible with the same explanations.
+Open paths use a warning badge at the affected terminal, without an extra open-
+connection glyph. Supply-short detection identifies a path through ideal
+connections, marking the source and components on that path. Global issues without
+an identified component remain in the message cards rather than marking an
+arbitrary part. Badges are rebuilt from the current circuit's validation report.
+
+### Results during validation issues
+
+If any error or warning is active, every schematic result box displays V: — and
+I: — and current arrows are hidden. Nominal component labels remain available.
+The solver may still calculate internal values for short/overcurrent validation,
+but partial or faulted results are not presented as usable circuit results.
+Validation cards use plain-language messages instead of raw solver status text.

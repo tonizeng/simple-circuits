@@ -8,6 +8,7 @@ class DrawingPlan:
     placements: dict = field(default_factory=dict)
     # Each net owns a list of orthogonal polylines in scene coordinates.
     routes: dict = field(default_factory=dict)
+    breaks: list = field(default_factory=list)
 
     def route(self, net, *points):
         self.routes.setdefault(net, []).append(points)
@@ -230,6 +231,12 @@ def open_series_parallel_layout(circuit):
                    rail[1] + (terminal[1] - rail[1]) * 20 / distance)
             plan.routes[target].remove(route)
             plan.route(net.id, terminal, tip)
+            refs = [(ref.component_id, ref.terminal)]
+            target_net = next(n for n in circuit.nets if n.id == target)
+            if len(target_net.terminals) == 1:
+                other = target_net.terminals[0]
+                refs.append((other.component_id, other.terminal))
+            plan.breaks.append((tuple(refs), ((tip[0] + rail[0]) / 2, (tip[1] + rail[1]) / 2)))
         if valid:
             return plan
     return None

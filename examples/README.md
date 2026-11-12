@@ -34,6 +34,17 @@ Both also appear in **Circuit Library** after the complete examples. They are
 rendering/diagnostic samples; Falstad export does not support these incomplete
 layouts. Existing library records are preserved when these samples are added.
 
+All example sources use **3.3 V**, matching the configured supply maximum.
+Checks assume settled DC; capacitor/inductor startup and turn-off are not assessed.
+Live protection belongs to firmware/hardware. Existing unmodified library examples upgrade automatically.
+
+## error circuit
+
+**Error — Shorted Supply** (`errors/01_supply_short.json`) connects an ideal wire
+across the 3.3 V source, bypassing a parallel resistor. Open it in **Circuit Library**
+to see the Error card and denied power validation. This is a software-only fault
+example; no malformed JSON is needed.
+
 ## use
 
 ```sh
@@ -62,6 +73,10 @@ potentiometer wipers. Example text exports are in [artifacts](../artifacts/).
 
 See the [Falstad/CircuitJS credits](../README.md#references) for references.
 
+**Error and Warning — Shorted Supply and Disconnected LED**
+(`errors/02_short_disconnected_led.json`) shows both severity cards: W1 shorts
+the supply and LED1 terminal 2 is disconnected. Diagnostic sample only.
+
 ## updates
 
 - 2026-10-31 — add simple circuits desktop prototype
@@ -70,3 +85,4 @@ See the [Falstad/CircuitJS credits](../README.md#references) for references.
 - 2026-10-31 — update read me
 - 2026-10-31 — update ui
 - 2026-11-01 — ui updates
+- 2026-11-12 — add circuit validation logic

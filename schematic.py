@@ -16,6 +16,71 @@ def highlight_color(item, role):
     return QColor((colors or DEFAULT_HIGHLIGHT_COLORS)[role])
 
 
+class DiagnosticBadge(QGraphicsItem):
+    """A fault indicator independent of component/node hover colours."""
+
+    def __init__(self, issues, component_id):
+        super().__init__()
+        self.component_id = component_id
+        self.issues = tuple(issues)
+        self.severity = "error" if any(i.severity == "error" for i in issues) else "warning"
+        self.setZValue(10)
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.setToolTip("\n\n".join(f"{i.severity.capitalize()}: {i.message}" for i in issues))
+
+    def boundingRect(self):
+        return QRectF(-11, -11, 22, 22)
+
+    def paint(self, painter, option, widget=None):
+        painter.setRenderHint(painter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#ffffff"), 1.5))
+        painter.setBrush(QColor("#c43c25" if self.severity == "error" else "#d2ac20"))
+        if self.severity == "error":
+            painter.drawEllipse(QRectF(-10, -10, 20, 20))
+        else:
+            painter.drawPolygon(QPolygonF([QPointF(0, -10), QPointF(11, 10), QPointF(-11, 10)]))
+        font = QFont(QApplication.font())
+        font.setPixelSize(14)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#ffffff" if self.severity == "error" else "#222222"))
+        painter.drawText(QRectF(-10, -9 if self.severity == "error" else -5, 20, 20),
+                         Qt.AlignmentFlag.AlignCenter, "!")
+
+
+def add_safety_badges(scene, symbols, issues, plan=None):
+    grouped = {}
+    marked = set()
+    for refs, position in (plan.breaks if plan is not None else ()):
+        related = [issue for issue in issues if issue.code == "unconnected_terminal"
+                   and any(ref in issue.terminal_refs for ref in refs)]
+        if related:
+            badge = DiagnosticBadge(related, refs[0][0])
+            badge.setPos(QPointF(*position) + QPointF(18, -15))
+            scene.addItem(badge)
+            marked.update(refs)
+    for issue in issues:
+        if issue.code == "unconnected_terminal":
+            for cid, terminal in issue.terminal_refs:
+                if (cid, terminal) not in marked and cid in symbols and terminal in symbols[cid].terminals:
+                    grouped.setdefault((cid, terminal), []).append(issue)
+        elif issue.code == "supply_short":
+            # Mark the bypass path rather than the affected source as well.
+            path = issue.component_ids[1:] or issue.component_ids[:1]
+            for cid in path:
+                if cid in symbols:
+                    grouped.setdefault((cid, None), []).append(issue)
+    for (cid, terminal), related in grouped.items():
+        symbol = symbols[cid]
+        badge = DiagnosticBadge(related, cid)
+        if terminal is not None:
+            position = symbol.terminal_position(terminal)
+        else:
+            position = (symbol.terminal_position("1") + symbol.terminal_position("2")) / 2
+        badge.setPos(position + QPointF(18, -15))
+        scene.addItem(badge)
+
+
 class ResultBox(QGraphicsPathItem):
     """Prototype readout with a green hover border."""
 
@@ -428,7 +493,7 @@ def draw_planned_nets(scene, circuit, plan):
             wire.dots.append(dot)
 
 
-def render_circuit(scene, circuit, simulation=None):
+def render_circuit(scene, circuit, simulation=None, issues=()):
     """Draw three-component series loops rectangularly, otherwise use net lanes.
 
     This initial layout prioritizes explicit connections over compact textbook
@@ -436,6 +501,7 @@ def render_circuit(scene, circuit, simulation=None):
     crossings. Only pass circuits produced by parse_topology().
     """
     scene.clear()
+    hide_results = bool(issues) or (simulation is not None and simulation.status != "solved")
     symbols = {}
     placements = rectangular_layout(circuit)
     plan = None if placements else (series_parallel_layout(circuit) or open_series_parallel_layout(circuit))
@@ -469,12 +535,14 @@ def render_circuit(scene, circuit, simulation=None):
                              symbol.y() - label.boundingRect().height() / 2)
         else:
             label.setX(symbol.x() - label.boundingRect().width() / 2)
-        result = simulation.components.get(component.id) if simulation is not None else None
+        result = simulation.components.get(component.id) if simulation is not None and not hide_results else None
         voltage = engineering(result.voltage_v, "V") if result is not None and result.voltage_v is not None else "—"
         current = engineering(abs(result.current_a), "A") if result is not None and result.current_a is not None else "—"
         symbol.current_a = result.current_a if result is not None else None
         output = add_label(scene, f"V: {voltage}\nI: {current}", 0, 0)
-        message = (simulation.message if simulation.status != "solved" else "") if simulation is not None else "No simulation results supplied."
+        # DC solver status messages are temporarily hidden from tooltips.
+        # message = (simulation.message if simulation.status != "solved" else "") if simulation is not None else "No simulation results supplied."
+        message = ""
         if result is not None and result.terminal_currents_a is not None:
             message += "\nPotentiometer I is current entering terminal 1; V is across track ends 1 and 2."
             message += "\nTerminal currents: " + ", ".join(
@@ -514,6 +582,7 @@ def render_circuit(scene, circuit, simulation=None):
             draw_planned_nets(scene, circuit, plan)
         else:
             draw_rectangular_nets(scene, circuit, symbols)
+        add_safety_badges(scene, symbols, issues, plan)
         scene.setSceneRect(scene.itemsBoundingRect().adjusted(-30, -30, 30, 30))
         return symbols
     pen = QPen(QColor("#555555"), 1.5)
@@ -537,5 +606,6 @@ def render_circuit(scene, circuit, simulation=None):
         for point in taps:
             dot = scene.addEllipse(point.x() - 2.5, lane_y - 2.5, 5, 5, pen, QColor("#555555"))
             wire.dots.append(dot)
+    add_safety_badges(scene, symbols, issues)
     scene.setSceneRect(scene.itemsBoundingRect().adjusted(-30, -30, 30, 30))
     return symbols

@@ -53,8 +53,8 @@ class NonlinearLEDTests(unittest.TestCase):
     def test_example_one_operating_point_and_optional_fixed_mode(self):
         circuit = parse_topology(example(1))
         result = solve_dc(circuit, led_model="falstad")
-        self.assertAlmostEqual(result.components["LED1"].voltage_v, 1.7608123733, places=8)
-        self.assertAlmostEqual(result.components["LED1"].current_a, .00981572008, places=10)
+        self.assertAlmostEqual(result.components["LED1"].voltage_v, 1.7235588736, places=8)
+        self.assertAlmostEqual(result.components["LED1"].current_a, .0047770943225, places=10)
         self.assertAlmostEqual(solve_dc(circuit).components["LED1"].voltage_v, 2)
 
     def test_open_and_closed_contacts(self):
@@ -65,7 +65,7 @@ class NonlinearLEDTests(unittest.TestCase):
                 result = solve_dc(parse_topology(data), led_model="falstad")
                 self.assertEqual(result.status, "solved", result.message)
                 self.assertAlmostEqual(result.components["R1"].current_a,
-                                       .00981572008 if enabled else 0, places=9)
+                                       .0047770943225 if enabled else 0, places=9)
                 if not enabled:
                     self.assertAlmostEqual(result.components["LED1"].voltage_v, 0, places=7)
 
@@ -77,7 +77,7 @@ class NonlinearLEDTests(unittest.TestCase):
                     terminal["terminal"] = "2" if terminal["terminal"] == "1" else "1"
         result = solve_dc(parse_topology(data), led_model="falstad")
         self.assertEqual(result.status, "solved", result.message)
-        self.assertAlmostEqual(result.components["LED1"].voltage_v, -5, places=7)
+        self.assertAlmostEqual(result.components["LED1"].voltage_v, -3.3, places=7)
         self.assertEqual(result.components["LED1"].state, "off")
 
     def test_identical_parallel_leds_share_current(self):

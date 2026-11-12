@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from dataclasses import replace
 
-from PySide6.QtCore import Qt, QSize, QRectF, QUrl, QPoint, QSettings
+from PySide6.QtCore import Qt, QSize, QRectF, QUrl, QPoint, QSettings, QTimer
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtGui import QFont, QFontDatabase, QPainter, QPixmap, QDesktopServices, QColor, QIcon
 from topology import parse_topology, TopologyError
@@ -16,6 +16,9 @@ from components import COMPONENT_NAMES, COMPONENT_DESCRIPTIONS
 from database import CircuitDatabase
 from formula_reference import FORMULA_TOPICS, FORMULA_EQUATIONS, FORMULA_CAPTIONS
 from simulation import solve_dc
+from circuit_safety import SafetyLimits, SafetyReport, SafetyIssue, assess_circuit
+from power_protection import PowerProtection
+from safety_ui import SafetyAlertsPanel
 from falstad import falstad_url, FalstadExportError
 from PySide6.QtWidgets import (
     QApplication, QFrame, QGraphicsScene, QGraphicsView, QHBoxLayout,
@@ -256,6 +259,16 @@ class CircuitWindow(QMainWindow):
     def __init__(self, database=None):
         super().__init__()
         self.database = database
+        self.topology_valid = False
+        self.hardware_topology_revision = None
+        self.power_granted = False
+        self.safety_panel = None
+        self.safety_alert_key = ()
+        self.request_issues = ()
+        self.safety_limits = SafetyLimits(3.3, 1.5)
+        self.power_protection = PowerProtection(self.safety_limits)
+        self.safety_report = SafetyReport((SafetyIssue("no_circuit", "Load a circuit before enabling power."),))
+        self.power_protection.update_report(self.safety_report)
         self.examples_dialog = None
         self.preferences = QSettings("SimpleCircuits", "Desktop")
         self.highlight_colors = dict(DEFAULT_HIGHLIGHT_COLORS)
@@ -435,7 +448,12 @@ class CircuitWindow(QMainWindow):
         schematic_area = QVBoxLayout()
         schematic_area.setContentsMargins(0, 0, 0, 0)
         schematic_area.setSpacing(8)
+        self.safety_status_text = "Waiting for a circuit"
         schematic_area.addWidget(self.canvas, 1)
+        self.protection_timer = QTimer(self)
+        self.protection_timer.setInterval(100)
+        self.protection_timer.timeout.connect(self.poll_power_protection)
+        self.protection_timer.start()
         body.addLayout(schematic_area, 1)
 
         self.setStyleSheet("""
@@ -562,6 +580,7 @@ class CircuitWindow(QMainWindow):
             QPushButton#settingsButton:hover { background: transparent; color: #ffffff; }
             QPushButton#settingsButton:pressed { background: transparent; color: #eeeeee; }
             QPushButton#settingsButton:focus { border: none; }
+            QPushButton:disabled { color: #888888; background: #e4e4e4; border: 1px solid #b8b8b8; }
             QPushButton:hover { background: #f1f1f1; }
             QPushButton:pressed { background: #cccccc; }
             QPushButton:focus { border: 2px solid #777777; }
@@ -576,25 +595,44 @@ class CircuitWindow(QMainWindow):
         width = self.circuit_name.fontMetrics().horizontalAdvance(text) + 36
         self.circuit_name.setFixedWidth(max(200, width))
 
-    def load_topology(self, data):
+    def load_topology(self, data, hardware_revision=None):
         """Load controller JSON/dict; invalid input preserves the current circuit."""
         try:
             circuit = parse_topology(data)
         except TopologyError as error:
-            QMessageBox.warning(self, "Invalid topology", str(error))
+            self.topology_valid = False
+            self.hardware_topology_revision = None
+            self.safety_report = SafetyReport((SafetyIssue("invalid_topology", str(error)),))
+            self.power_protection.update_report(self.safety_report)
+            self.refresh_safety_status()
             return False
-        return self.display_circuit(circuit)
+        return self.display_circuit(circuit, hardware_revision=hardware_revision)
 
-    def display_circuit(self, circuit, preserve_view=False):
+    def display_circuit(self, circuit, preserve_view=False, measurement_update=False, hardware_revision=None):
         center = self.canvas.mapToScene(self.canvas.viewport().rect().center())
         transform = self.canvas.transform()
-        self.simulation_result = solve_dc(circuit)
-        display_circuit = (replace(circuit, ground_node=self.simulation_result.ground_node)
-                           if self.simulation_result.ground_node is not None else circuit)
-        render_circuit(self.scene, display_circuit, self.simulation_result)
-        self.statusBar().showMessage(
-            "" if self.simulation_result.status == "solved" else self.simulation_result.message
-        )
+        analysis_circuit = self.circuit_with_measured_voltage(circuit)
+        self.simulation_result = solve_dc(analysis_circuit)
+        if not measurement_update:
+            self.power_granted = False
+            if self.safety_panel is not None:
+                self.safety_panel.reset_position()
+            self.request_issues = ()
+            self.topology_valid = True
+            self.hardware_topology_revision = hardware_revision
+        if self.topology_valid:
+            self.safety_report = assess_circuit(analysis_circuit, self.safety_limits, self.simulation_result)
+        self.power_protection.update_report(self.safety_report, topology_changed=not measurement_update,
+                                            revision=self.hardware_topology_revision)
+        self.refresh_safety_status(redraw=False)
+        display_circuit = (replace(analysis_circuit, ground_node=self.simulation_result.ground_node)
+                           if self.simulation_result.ground_node is not None else analysis_circuit)
+        render_circuit(self.scene, display_circuit, self.simulation_result, self.current_safety_issues)
+        # DC solver status messages are temporarily hidden.
+        # self.statusBar().showMessage(
+        #     "" if self.simulation_result.status == "solved" else self.simulation_result.message
+        # )
+        self.statusBar().clearMessage()
         self.statusBar().setToolTip("V = V1 − V2. Current displays magnitude; arrows indicate conventional current direction.")
         self.circuit = circuit
         names = COMPONENT_NAMES
@@ -687,6 +725,113 @@ class CircuitWindow(QMainWindow):
         self.component_legend.setRowHidden(row, not expanded)
         self.resize_component_legend()
 
+    def circuit_with_measured_voltage(self, circuit):
+        guard = self.power_protection
+        fresh = guard.last_sample is not None and 0 <= guard.clock() - guard.last_sample <= guard.timeout_s
+        sources = [c for c in circuit.components if c.type == "voltage_source"]
+        if guard.transport is None or not fresh or len(sources) != 1:
+            return circuit
+        return replace(circuit, components=tuple(
+            replace(c, parameters={**c.parameters, "voltage_v": guard.voltage_v})
+            if c.type == "voltage_source" else c for c in circuit.components))
+
+    def refresh_safety_status(self, extra_issues=None, redraw=True):
+        if extra_issues is not None:
+            self.request_issues = tuple(extra_issues)
+        guard = self.power_protection
+        issues = tuple(self.safety_report.issues) + guard.runtime_issues + self.request_issues
+        issues = tuple({(i.code, i.message): i for i in issues if i.code != "no_circuit"}.values())
+        if issues or guard.transport is None or not self.topology_valid:
+            self.power_granted = False
+        self.current_safety_issues = issues
+        if issues:
+            text = "Validation required — " + issues[0].message
+        elif not self.topology_valid:
+            text = "Waiting for a circuit"
+        elif guard.transport is None:
+            text = "Circuit checks passed — board not connected"
+        else:
+            text = "Circuit checks passed — waiting for the board’s enable request"
+        self.safety_status_text = text
+        checks_passed = self.topology_valid and not issues
+        key = (checks_passed, tuple((i.code, i.severity, i.message) for i in issues))
+        if key != self.safety_alert_key:
+            self.safety_alert_key = key
+            if issues or checks_passed:
+                if self.safety_panel is None:
+                    self.safety_panel = SafetyAlertsPanel(self.canvas.viewport())
+                self.safety_panel.set_issues(issues, checks_passed=checks_passed)
+                self.safety_panel.show()
+            elif self.safety_panel is not None:
+                self.safety_panel.set_issues(())
+            if redraw and self.circuit is not None:
+                displayed = replace(self.circuit_with_measured_voltage(self.circuit),
+                                    ground_node=self.simulation_result.ground_node)
+                render_circuit(self.scene, displayed, self.simulation_result, issues)
+
+    def attach_power_transport(self, sender):
+        """Future firmware adapter: sender receives PowerDecision responses only."""
+        self.power_protection.attach_transport(sender)
+        self.request_issues = ()
+        self.hardware_topology_revision = None
+        self.refresh_safety_status()
+
+    def disconnect_power_transport(self):
+        self.power_protection.disconnect()
+        self.request_issues = ()
+        self.hardware_topology_revision = None
+        if self.circuit is not None:
+            self.display_circuit(self.circuit, preserve_view=True, measurement_update=True)
+        self.refresh_safety_status()
+
+    def receive_hardware_topology(self, data, revision):
+        """Firmware snapshots need an increasing revision within each connection."""
+        if self.power_protection.transport is None:
+            return False
+        if type(revision) is not int or revision <= self.power_protection.highest_revision:
+            self.topology_valid = False
+            self.hardware_topology_revision = None
+            self.safety_report = SafetyReport((SafetyIssue("stale_topology", "Board topology revision is stale or invalid."),))
+            self.power_protection.update_report(self.safety_report)
+            self.refresh_safety_status()
+            return False
+        return self.load_topology(data, hardware_revision=revision)
+
+    def handle_enable_request(self, request_id, topology_revision):
+        """Validate the latest board snapshot and reply; firmware decides whether to power it."""
+        if self.circuit is not None:
+            self.display_circuit(self.circuit, preserve_view=True, measurement_update=True)
+        decision = self.power_protection.handle_enable_request(request_id, topology_revision)
+        self.power_granted = decision.granted
+        if not decision.granted and self.safety_panel is not None and not self.safety_panel.isVisible():
+            self.safety_alert_key = ()
+        self.refresh_safety_status(decision.issues)
+        return decision
+
+    def receive_supply_measurement(self, voltage_v, current_a):
+        """Call on the UI thread with fresh upstream voltage and load current."""
+        guard = self.power_protection
+        if guard.transport is None:
+            return False
+        valid = guard.observe(voltage_v, current_a)
+        if self.circuit is not None and guard.voltage_v is not None:
+            self.display_circuit(self.circuit, preserve_view=True, measurement_update=True)
+        self.refresh_safety_status()
+        return valid
+
+    def receive_firmware_fault(self, message):
+        """Firmware reports its own latched fault, or None after it clears it."""
+        self.power_protection.report_firmware_fault(message)
+        self.refresh_safety_status()
+
+    def poll_power_protection(self):
+        self.refresh_safety_status()
+
+    def closeEvent(self, event):
+        self.protection_timer.stop()
+        self.power_protection.disconnect()
+        super().closeEvent(event)
+
     def show_settings(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Settings")
@@ -740,8 +885,9 @@ class CircuitWindow(QMainWindow):
         for role, color in colors.items():
             self.preferences.setValue("highlights/" + role, color)
         if self.circuit is not None:
-            displayed = replace(self.circuit, ground_node=self.simulation_result.ground_node)
-            render_circuit(self.scene, displayed, self.simulation_result)
+            displayed = replace(self.circuit_with_measured_voltage(self.circuit),
+                                ground_node=self.simulation_result.ground_node)
+            render_circuit(self.scene, displayed, self.simulation_result, self.current_safety_issues)
         self.scene.update()
 
     def open_in_falstad(self):
@@ -770,8 +916,12 @@ class CircuitWindow(QMainWindow):
             if not names:
                 self.database.import_folder(Path(__file__).resolve().parent / "examples")
                 names = self.database.list_names()
+            self.database.upgrade_stock_sources(Path(__file__).resolve().parent / "examples")
             # Add diagnostic examples to existing libraries without overwriting records.
-            for path in sorted((Path(__file__).resolve().parent / "examples" / "incomplete").glob("*.json")):
+            examples_folder = Path(__file__).resolve().parent / "examples"
+            for path in sorted(examples_folder.rglob("*.json")):
+                if path.parent == examples_folder:
+                    continue
                 data = json.loads(path.read_bytes())
                 if data["name"] not in names:
                     self.database.save(data)

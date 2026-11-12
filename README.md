@@ -19,11 +19,13 @@ On Windows, create the environment with `python` and activate it with
 
 ## current features
 
-- Eleven circuit examples, vector symbols, component legends, hover highlights,
+- Eleven 3.3 V circuit examples, vector symbols, component legends, hover highlights,
   and Guide/Formulas tabs for reading results and equation references.
 - DC steady-state MNA for all 11 examples; Falstad export for all bundled examples.
 - SQLite circuit library; an empty database is seeded automatically.
 - Current magnitude and direction arrows; unknown results display `—`.
+- Pre-power checks against 3.3 V / 1.5 A, with short detection and automatic
+  Error/Warning cards in a draggable panel inside the schematic. The board requests approval; firmware owns power and cutoff.
 
 Switches/buttons reflect topology data and cannot be changed in the UI. LEDs use
 fixed forward voltage by default; an optional exponential solver is available
@@ -34,7 +36,9 @@ Charging and other transient waveforms are not simulated locally.
 Falstad export requires a single-source series/parallel layout with unloaded
 potentiometer wipers. Falstad runs its own simulation; results may differ.
 Settings let users choose and save component, node, and current-arrow colours.
-Hardware communication, UI saving, and transient simulation remain pending.
+Battery voltage/current telemetry can feed the protection API and update calculations.
+Physical current limiting/cutoff still requires firmware and hardware support; serial
+integration, UI saving, and transient simulation remain pending.
 
 ## useful commands
 
@@ -79,3 +83,4 @@ independently.
 - 2026-10-31 — update read me
 - 2026-10-31 — update ui
 - 2026-11-01 — ui updates
+- 2026-11-12 — add circuit validation logic

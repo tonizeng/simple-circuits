@@ -51,7 +51,8 @@ class RenderingTests(unittest.TestCase):
                     painter.end()
                 for symbol in symbols.values():
                     output = symbol.result_box.childItems()[0]
-                    result = window.simulation_result.components.get(symbol.component.id)
+                    hidden = bool(window.current_safety_issues) or window.simulation_result.status != "solved"
+                    result = None if hidden else window.simulation_result.components.get(symbol.component.id)
                     voltage = engineering(result.voltage_v, "V") if result is not None and result.voltage_v is not None else "—"
                     current = engineering(abs(result.current_a), "A") if result is not None and result.current_a is not None else "—"
                     self.assertEqual(output.text(), f"V: {voltage}\nI: {current}")

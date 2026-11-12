@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import copy
 import sqlite3
 from pathlib import Path
 
@@ -57,6 +58,23 @@ class CircuitDatabase:
             return [row[0] for row in connection.execute(
                 "SELECT name FROM circuits ORDER BY name COLLATE NOCASE"
             )]
+
+    def upgrade_stock_sources(self, folder):
+        """Upgrade exact legacy 5 V bundled records, preserving customized circuits."""
+        names = set(self.list_names())
+        updated = []
+        for path in sorted(Path(folder).rglob("*.json")):
+            current = json.loads(path.read_bytes())
+            if current["name"] not in names:
+                continue
+            legacy = copy.deepcopy(current)
+            for component in legacy["components"]:
+                if component["type"] == "voltage_source":
+                    component["parameters"]["voltage_v"] = 5.0
+            if self.load(current["name"]) == legacy:
+                self.save(current)
+                updated.append(current["name"])
+        return updated
 
     def import_folder(self, folder):
         return [self.save(path.read_bytes()) for path in sorted(Path(folder).glob("*.json"))]

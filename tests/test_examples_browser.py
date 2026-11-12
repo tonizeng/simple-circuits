@@ -27,14 +27,14 @@ class ExamplesBrowserTests(unittest.TestCase):
             QTest.mouseClick(window.examples_button, Qt.MouseButton.LeftButton)
             self.app.processEvents()
             names = database.list_names()
-            self.assertEqual(len(names), 13)
+            self.assertEqual(len(names), 14)
             for name in names:
                 if window.examples_dialog is None:
                     window.show_examples()
                 self.app.processEvents()
                 dialog = window.examples_dialog
                 items = dialog.findChild(QListWidget)
-                self.assertEqual(items.count(), 13)
+                self.assertEqual(items.count(), 14)
                 expected_names = [json.loads(path.read_text())["name"] for path in sorted(
                     (Path(__file__).resolve().parents[1] / "examples").rglob("*.json"))]
                 self.assertEqual([items.item(row).text() for row in range(items.count())], expected_names)

@@ -8,7 +8,7 @@
       "id": "V1",
       "type": "voltage_source",
       "parameters": {
-        "voltage_v": 5
+        "voltage_v": 3.3
       }
     },
     {

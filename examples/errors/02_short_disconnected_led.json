@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "circuit_id": "error_short_disconnected_led",
+  "name": "Error and Warning \u2014 Shorted Supply and Disconnected LED",
+  "ground_node": "n0",
+  "components": [
+    {
+      "id": "V1",
+      "type": "voltage_source",
+      "parameters": {
+        "voltage_v": 3.3
+      }
+    },
+    {
+      "id": "R1",
+      "type": "resistor",
+      "parameters": {
+        "resistance_ohm": 1000
+      }
+    },
+    {
+      "id": "W1",
+      "type": "wire",
+      "parameters": {}
+    },
+    {
+      "id": "LED1",
+      "type": "led",
+      "parameters": {
+        "forward_voltage_v": 2.0
+      }
+    }
+  ],
+  "nets": [
+    {
+      "id": "n1",
+      "terminals": [
+        {
+          "component_id": "V1",
+          "terminal": "1"
+        },
+        {
+          "component_id": "R1",
+          "terminal": "1"
+        },
+        {
+          "component_id": "W1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n0",
+      "terminals": [
+        {
+          "component_id": "V1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "W1",
+          "terminal": "2"
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "terminals": [
+        {
+          "component_id": "R1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "LED1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n_open",
+      "terminals": [
+        {
+          "component_id": "LED1",
+          "terminal": "2"
+        }
+      ]
+    }
+  ],
+  "description": "Intentional diagnostic example: W1 shorts the supply while LED1 terminal 2 is disconnected. Displays both error and warning cards; do not build physically."
+}

@@ -49,3 +49,18 @@ class DatabaseTests(unittest.TestCase):
                 with self.subTest(data=data), self.assertRaises(ValueError):
                     database.save(data)
             self.assertEqual(database.list_names(), [])
+
+    def test_stock_voltage_upgrade_preserves_custom_records(self):
+        examples = Path(__file__).resolve().parents[1] / "examples"
+        stock = json.loads((examples / "01_led_series.json").read_text())
+        legacy = json.loads(json.dumps(stock))
+        legacy["components"][0]["parameters"]["voltage_v"] = 5
+        with tempfile.TemporaryDirectory() as folder:
+            database = CircuitDatabase(Path(folder) / "circuits.sqlite3")
+            database.save(legacy)
+            self.assertEqual(database.upgrade_stock_sources(examples), [stock["name"]])
+            self.assertEqual(database.load(stock["name"]), stock)
+            legacy["notes"] = "custom record"
+            database.save(legacy)
+            self.assertEqual(database.upgrade_stock_sources(examples), [])
+            self.assertEqual(database.load(stock["name"]), legacy)
