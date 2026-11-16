@@ -14,8 +14,9 @@ Falstad export supports **all examples**. Component values use base SI units.
 | 07 | RC charging |
 | 08 | RL step response |
 | 09 | potentiometer divider |
-| 10 | photodiode sensor |
+| 10 | photoresistor divider |
 | 12 | LED circuit with explicit wire |
+| 13 | series RLC circuit |
 
 ## incomplete circuits
 
@@ -65,8 +66,8 @@ Terminals are `"1"` and `"2"`; potentiometers add `"3"` for the wiper. LEDs use
 `LED1`, inductors use `L1`. Full parameter definitions are in
 [circuits.md](../circuits.md).
 
-Potentiometers export as two track resistors joined at the wiper; photodiodes
-export as a diode in parallel with a photocurrent source. Diode/LED results may
+Potentiometers export as two track resistors joined at the wiper; photoresistors
+export as resistors using their supplied resistance. Diode/LED results may
 differ because Falstad uses nonlinear models instead of our fixed-drop model.
 Export currently requires a single-source series/parallel layout and unloaded
 potentiometer wipers. Example text exports are in [artifacts](../artifacts/).
@@ -86,3 +87,14 @@ the supply and LED1 terminal 2 is disconnected. Diagnostic sample only.
 - 2026-10-31 — update ui
 - 2026-11-01 — ui updates
 - 2026-11-12 — add circuit validation logic
+
+The series RLC example uses a 3.3 V source, 10 Ω resistor, 10 mH inductor, and
+100 µF capacitor. Rendering, DC equilibrium, and Falstad export are supported.
+A local analytical series-RLC preview supports underdamped, critically damped,
+and overdamped responses through the schematic time slider. Inductor turn-off protection checks are deferred pending the
+hardware design; software checks do not verify transient protection.
+
+Example 08 supports a local first-order RL time preview: τ = 100 µs for
+10 mH / 100 Ω. Use the schematic slider for predicted voltage/current changes;
+select L1 for timing and plots. Example 13 also supports an analytical series-RLC time preview.
+- 2026-11-16 — changed ui

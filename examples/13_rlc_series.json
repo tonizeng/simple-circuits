@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "circuit_id": "13_rlc_series",
+  "name": "Series RLC Circuit",
+  "ground_node": "n0",
+  "components": [
+    {
+      "id": "V1",
+      "type": "voltage_source",
+      "parameters": {
+        "voltage_v": 3.3
+      }
+    },
+    {
+      "id": "R1",
+      "type": "resistor",
+      "parameters": {
+        "resistance_ohm": 10
+      }
+    },
+    {
+      "id": "L1",
+      "type": "inductor",
+      "parameters": {
+        "inductance_h": 0.01,
+        "initial_current_a": 0
+      }
+    },
+    {
+      "id": "C1",
+      "type": "capacitor",
+      "parameters": {
+        "capacitance_f": 0.0001,
+        "initial_voltage_v": 0
+      }
+    }
+  ],
+  "nets": [
+    {
+      "id": "n1",
+      "terminals": [
+        {
+          "component_id": "V1",
+          "terminal": "1"
+        },
+        {
+          "component_id": "R1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "terminals": [
+        {
+          "component_id": "R1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "L1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "terminals": [
+        {
+          "component_id": "L1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "C1",
+          "terminal": "1"
+        }
+      ]
+    },
+    {
+      "id": "n0",
+      "terminals": [
+        {
+          "component_id": "C1",
+          "terminal": "2"
+        },
+        {
+          "component_id": "V1",
+          "terminal": "2"
+        }
+      ]
+    }
+  ]
+}

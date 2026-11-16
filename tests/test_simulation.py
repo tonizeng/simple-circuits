@@ -16,7 +16,7 @@ def example(number):
 
 def solve(data):
     # Retain regression coverage for the optional introductory fixed-drop model.
-    return solve_dc(parse_topology(data), led_model="fixed")
+    return solve_dc(parse_topology(data))
 
 
 class SimulationTests(unittest.TestCase):

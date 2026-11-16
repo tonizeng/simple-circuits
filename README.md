@@ -28,8 +28,7 @@ On Windows, create the environment with `python` and activate it with
   Error/Warning cards in a draggable panel inside the schematic. The board requests approval; firmware owns power and cutoff.
 
 Switches/buttons reflect topology data and cannot be changed in the UI. LEDs use
-fixed forward voltage by default; an optional exponential solver is available
-with `solve_dc(circuit, led_model="falstad")`.
+a fixed forward-voltage model.
 
 Capacitors are open and inductors are zero-voltage connections at DC equilibrium.
 Charging and other transient waveforms are not simulated locally.
@@ -71,9 +70,8 @@ README update entries and lowercase commit messages. The hook appends entries wh
 
 [Falstad Circuit Simulator](https://www.falstad.com/circuit/) by Paul Falstad,
 and [CircuitJS1](https://github.com/sharpie7/circuitjs1), adapted for the browser
-by Iain Sharp, are references for export formats and the optional exponential
-LED model. This app exports circuit data to CircuitJS; its local solver runs
-independently.
+by Iain Sharp, are references for export formats. This app exports circuit data
+to CircuitJS; its local fixed-drop solver runs independently.
 
 ## updates
 
@@ -84,3 +82,4 @@ independently.
 - 2026-10-31 — update ui
 - 2026-11-01 — ui updates
 - 2026-11-12 — add circuit validation logic
+- 2026-11-16 — changed ui

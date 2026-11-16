@@ -117,9 +117,8 @@ reference can remain unset for drawing, but the solver requires an explicit choi
 The selected net retains its original ID and remains in `nets`; only its voltage
 unknown is omitted from the MNA system. MNA handles floating voltage sources
 using extra current unknowns and voltage constraints without explicit supernodes.
-With the optional Falstad-compatible exponential model, example 1 gives about
-4.7771 mA and LED voltage 1.7236 V. The default fixed-drop model gives
-`(3.3 - 2) / 330 ≈ 3.94 mA`. These are model predictions, not measured results.
+The fixed-drop LED model gives `(3.3 - 2) / 330 ≈ 3.94 mA` in example 1.
+These are model predictions, not measured results.
 
 ## Planned processing
 
@@ -158,8 +157,7 @@ supported for drawing, using the example parameter fields. `components.py`
 shares names, numeric/boolean validation rules, terminal definitions, and labels.
 The current
 LED input only requires `forward_voltage_v`; no model field is required or used.
-The default DC LED model is fixed-drop on/off; the Falstad-compatible exponential
-model is optional through solve_dc(circuit, led_model="falstad").
+The DC LED model is fixed-drop on/off.
 Every terminal must appear exactly once. Represent an open terminal with a
 singleton net. Currently, an explicit `ground_node` must identify an existing
 net; omission leaves the topology reference unset. The solver selects a reference
@@ -200,7 +198,7 @@ opens the generated link for supported circuits.
 Storage is independent of component rendering support.
 
 The intended component scope is DC sources, resistors, wires, LEDs, diodes,
-switches, buttons, photodiodes, capacitors, inductors, and potentiometers.
+switches, buttons, photoresistors, capacitors, inductors, and potentiometers.
 `examples/README.md` documents 11 educational circuits and the component input
 parameters. Every example can be parsed, rendered, and stored; DC
 steady-state simulation is available for all 11 examples. Switch/button symbols start from JSON
@@ -244,10 +242,10 @@ Do not invert A explicitly. Ground selection follows the rule above.
 - Contact: open means zero current; closed means a zero-voltage constraint,
   with a branch-current unknown if current is to be displayed. Detect redundant
   ideal constraints rather than disguising a singular system.
-- Optional fixed LED model: On:
+- Fixed LED model: On:
   V1 - V2 = Vf and current >= 0. Off: current = 0 and V1 - V2 <= Vf.
   Check state consistency and convergence; do not treat every LED as an always-on
-  voltage source. The default nonlinear model is described below.
+  voltage source.
 
 Open contacts/off LEDs can leave some voltages undetermined (including the
 released-button example). A chosen reference alone does not fix every floating
@@ -256,7 +254,7 @@ resistance or arbitrary voltages. Any numerical regularization must be a
 separate, documented modeling choice.
 
 Test analytical expectations before UI integration: LED current approximately
-4.7771 mA with exponential LEDs (3.94 mA in fixed mode) in example 1; 1.65 V divider midpoint in example 2; separate parallel
+3.94 mA with fixed-drop LEDs in example 1; 1.65 V divider midpoint in example 2; separate parallel
 branch currents in example 3; open/closed states in example 4; pressed/released
 behavior in example 5. Also test reversed LEDs, shorts, floating nodes, and
 inconsistent ideal sources. Replace `—` in result boxes only with actual valid
@@ -268,7 +266,7 @@ a diode-specific nonlinear implementation, and shared switch/button behavior.
 Use it as an architectural reference; a full port is not needed.
 
 The fixed-drop path enumerates LED states (maximum 8 LEDs, 128 MNA
-unknowns); it also supplies a starting estimate for the optional nonlinear solve. Full-rank systems use a direct linear solve. Singular systems use SVD
+unknowns). Full-rank systems use a direct linear solve. Singular systems use SVD
 to identify free variables, and SciPy HiGHS linear programming checks feasible
 LED inequalities and bounds each requested quantity. Only values unique across
 all feasible states are displayed; the minimum-norm solution is not treated as
@@ -291,28 +289,6 @@ conventional current direction (1→2 for positive, 2→1 for negative). They ro
 with symbols, darken to #1b5a88 on hover, and are hidden for unknown or
 effectively zero current (absolute value <= 1e-12 A). Voltage remains V1 − V2.
 
-## Optional exponential LED model
-
-`simulation/led_model.py` implements I = Is × (exp(V / a) − 1), with
-`a = 2 × 0.025865 V` and `Is = 1 / (exp(forward_voltage_v / a) − 1)`.
-This matches CircuitJS's `DiodeModel.getModelWithParameters` for our flag-1 LED
-exports. In this optional mode, Vf is a calibration voltage at 1 A.
-The default fixed-drop UI labels remain `Vf = …`.
-There is no series resistance, reverse breakdown, or temperature variation.
-This is not the named `default-led` model, which has different parameters.
-
-`simulation/nonlinear.py` uses SciPy nonlinear least squares with an analytic
-Jacobian to solve KCL, ideal source/contact constraints, and LED equations.
-Exponential trial steps are protected against overflow; final residuals must
-satisfy the exact equation. Failure produces no fabricated result. Converged
-junction V/I constraints feed ambiguity analysis for remaining linear freedoms.
-Physical exponential leakage can determine downstream open-contact voltages;
-the old fixed-model rule that these are necessarily floating no longer applies.
-The fixed model remains accessible through `solve_dc(circuit, led_model="fixed")`.
-No physical controls are introduced; topology remains authoritative.
-
-[Reference LED calibration](https://github.com/sharpie7/circuitjs1/blob/master/src/com/lushprojects/circuitjs1/client/DiodeModel.java)
-
 ## DC models for examples 6–12
 
 The default fixed-drop solver supports all component types in the bundled examples:
@@ -324,7 +300,7 @@ The default fixed-drop solver supports all component types in the bundled exampl
 | capacitor | open circuit (I = 0) after settling |
 | inductor | ideal zero-voltage constraint after settling |
 | potentiometer | R13 = total R × position; R32 = total R × (1 − position) |
-| photodiode | photocurrent source from cathode to anode, parallel forward diode |
+| photoresistor | supplied resistance, using the same electrical model as a resistor |
 
 Potentiometer positions 0 and 1 use an ideal contact for the zero-length track
 segment, without division by zero. `ComponentResult.terminal_currents_a` provides
@@ -333,26 +309,21 @@ current; its V is the full track voltage, not wiper voltage. Wiper voltage is
 available in `node_voltages`. Wire/inductor loops may have ambiguous individual
 currents; those remain unavailable instead of being assigned arbitrarily.
 
-Photodiode `photocurrent_a` is positive from cathode to anode, hence a negative
-terminal-1-to-2 current when reverse biased. Its forward junction uses an optional
-positive `forward_voltage_v`, default 0.7 V (a simplified software assumption).
-No capacitance, dark leakage, or reverse breakdown is modeled.
+Photoresistors use the supplied positive `resistance_ohm`, modeled with Ohm’s law.
+No light-to-resistance conversion is inferred.
 
 Capacitor/inductor initial conditions are retained in JSON but do not affect
 DC equilibrium. Status messages identify that transient behavior is not simulated.
 
-Optional exponential LED mode currently rejects circuits also containing ordinary
-diodes or photodiodes; use the default fixed mode for those combinations. Falstad
-export supports all current component types (see the export section below).
+Falstad export supports all current component types (see the export section below).
 No schematic interaction can change physical component states.
 
 Model references:
-- [Photodiode equivalent circuit](https://wiki.analog.com/university/courses/electronics/text/light-sensors-photodiodes)
 
 ## Falstad export
 
 Implemented in `falstad.py` for every current component type: resistor, DC source,
-LED, diode, switch, button, wire, capacitor, inductor, potentiometer, and photodiode.
+LED, diode, switch, button, wire, capacitor, inductor, potentiometer, and photoresistor.
 All 11 bundled examples export. Layout still requires a single-source
 series/parallel network; potentiometer wipers must currently be unloaded. The UI's
 Export to Falstad button opens the encoded current circuit in the default
@@ -374,8 +345,7 @@ explicit-forward-drop record, with terminal 1 as anode and terminal 2 as cathode
 Potentiometers export as two resistors with a shared wiper: R(1–3) = R × position
 and R(3–2) = R × (1 − position). At exact endpoints the zero-ohm section is a wire.
 This preserves the requested position without a quantized interactive slider.
-Photodiodes export as a diode and parallel current source from cathode to anode,
-using photocurrent_a and optional forward_voltage_v (default 0.7 V).
+Photoresistors export as ordinary resistors at their supplied resistance; light changes are not simulated in the export.
 Falstad runs nonlinear/transient models independently; numerical results can differ
 from the local fixed-drop DC equilibrium calculation. Export tests verify connectivity, polarity,
 parameters, contact flags, URL encoding, and UI dispatch; live browser execution
@@ -405,11 +375,8 @@ connections must be reconstructed with shared post coordinates and wires.
 - Resistors, DC sources, wires, capacitors, inductors, diodes, LEDs, contacts,
   and potentiometers have corresponding CircuitJS elements. Momentary buttons
   use switch behavior; the potentiometer wiper's computed post needs adapting.
-- The optional exponential LED model matches the explicit-Vf exports. Named Falstad LED
-  models can differ and are not automatically matched by a single Vf input.
-- Native photodiode support has not been confirmed in the inspected source.
-  A diode plus a parallel photocurrent source is a possible approximation;
-  this must be explicit to the user, not a silent substitution.
+- Falstad LED results may differ from local fixed-drop predictions.
+- Photoresistors export their present resistance, without an interactive light model.
 - Start by importing/exporting the resistor/LED example, verify connections and
   polarity in the browser, then cover all examples and test junction handling.
 
@@ -554,3 +521,227 @@ I: — and current arrows are hidden. Nominal component labels remain available.
 The solver may still calculate internal values for short/overcurrent validation,
 but partial or faulted results are not presented as usable circuit results.
 Validation cards use plain-language messages instead of raw solver status text.
+
+
+### Component inspector
+
+The right inspector uses one shared component selection from the schematic or
+Detected Components. Its help icon opens the preserved, expandable How to read
+topics without replacing the inspector. The compact identity header uses the
+existing vector symbols. Electrical properties are read-only; source voltage is
+labelled nominal, and solver results are labelled calculated. Any validation issue
+suppresses calculated values and worked examples, while nominal properties remain.
+Purpose and Related formulas are collapsible; variable definitions are nested and
+collapsed by default. Formulas use the existing SVG assets. Worked examples use
+available signed solver values only. Source delivered power is `-V * I` under the
+solver's current-into-terminal-1 convention; formula examples instead explicitly
+define source current as leaving the positive terminal. No transient example or
+three-terminal potentiometer total power is inferred from a single branch current.
+
+
+Inspector equations now follow each component's intrinsic model under
+**Equations & behaviour**, without a generic power-formula fallback. Resistors
+show Ohm's law; sources their voltage constraint; diodes/LEDs the fixed-drop
+conducting/blocking rules; contacts their open/closed rules; wires zero drop;
+potentiometers both track-segment resistances; and photoresistors Ohm’s law. Capacitor/inductor equations remain educational and explicitly
+distinguish transient relationships from the settled-DC solver. Equation SVGs and
+their container use transparent backgrounds. Circuit-specific divider/LED-sizing
+formulas are not inferred for arbitrary selected components.
+
+
+### Circuit overview and status placement
+
+The left sidebar now contains Connectivity, Circuit Upload, and Circuit Status.
+Validation error/warning/success cards are embedded in Circuit Status, with an
+error/warning count; they no longer float over the schematic or drag independently.
+Long messages grow within the existing sidebar scroll region. Schematic fault
+badges remain visible. The right inspector's unselected state is Circuit overview,
+with component/node counts and expandable selection lists. Component selections
+reuse the same detected-component rows; node selections show node details. Clearing
+a selection returns to this overview. Counts and lists come from the loaded topology,
+not firmware connection/upload telemetry, which remains unintegrated.
+
+
+Circuit Status now appears first in the left sidebar as one white rounded card.
+Its compact headline is Checks passed, Review required, or Errors detected, with
+Power approved / Power not approved beneath it. Error rows precede warning rows;
+severity uses restrained red/amber icons and left-edge accents. Clicking a located
+issue opens its component/node details and reveals the fault marker. Existing
+schematic warning/error badges remain in place. Approval text describes desktop
+validation, not confirmation that firmware has enabled physical power.
+
+
+### Circuit Library page
+
+Circuit Library is now a scrollable workspace page rather than a modal browser.
+SQLite-backed cards show a renderer-generated preview, circuit name, component/node
+counts, and Open circuit. Bundled examples retain filename order, including error
+and incomplete diagnostics; existing saved records are preserved. Opening a card
+loads the circuit and returns to Circuit. My Circuits remains a placeholder.
+The inspector no longer shows an Equations section; electrical properties and
+Purpose remain. Formula reference assets are retained for possible future use.
+
+
+### Circuit Guide
+
+The header's Guide button, beside Save Schematic, opens a reusable non-modal
+Circuit Guide window from every page. Reading the schematic covers terminals,
+nodes, voltage signs, current direction, ground, selection, fault symbols,
+unavailable results, approval, settled DC, and display controls. Terminology defines
+the core circuit and value labels. Guidance does not edit circuits or enable power.
+
+
+### Current display modes
+
+Settings offers Arrows + magnitude (default) or Signed current. The choice is
+persisted in `display/current`. Both modes use the same solver results. Signed
+mode hides current-direction arrows and displays positive/negative current using
+terminal 1 → 2 as its reference, in both schematic readouts and component details.
+Voltage remains signed in either mode. Unavailable results remain dashes. The
+Guide explains both presentations; changing presentation does not change topology,
+contact states, approval, or electrical calculations.
+
+
+### Schematic grid
+
+The canvas draws optional scene-aligned grid lines, panning/zooming with the
+schematic. Major spacing is 20 scene units with 10-unit subdivisions for terminal
+geometry (including potentiometer wipers). Drawing placements and planned wire
+bends snap to these subdivisions without changing electrical topology or solver
+inputs; disconnected wire gaps are retained. Settings → Show schematic grid
+controls visibility and persists it in `display/grid`. Zoom controls and the
+legend use subtle drop shadows and remain fixed to the viewport.
+
+
+The schematic toolbar now includes a checkable Pan hand tool for left-button
+dragging; middle-button panning remains available. Panning expands view bounds so
+it works even when the circuit fits, without modifying scene geometry or solver
+inputs. Disable Pan to resume component/node selection. The active navigation page
+uses its existing white fill and a thin purple outline; the left-edge bar is gone.
+
+
+### First-order RC timing
+
+`simulation/rc.py` calculates the Thevenin resistance seen across a single capacitor,
+with independent DC voltage sources replaced by ideal shorts. Resistor series and
+parallel networks, wires, and current switch/button states are supported. The
+capacitor inspector displays equivalent resistance, τ = R_th C, time to complete
+90% and 99% of a voltage change, and approximate settling at 5τ (99.3%).
+
+Delay uses t = −τ ln(1 − f), where f is progress toward the final voltage. The
+`voltage_delay_s(initial_v, final_v, target_v)` API also supports a specific charging
+or discharging threshold; unreachable thresholds and the exact asymptotic final
+voltage are rejected. The UI currently shows percentage delays, not an editable
+voltage threshold. Initial/final voltages must correspond to the actual step event.
+
+This is analytical step-response timing, not a time-domain simulation or startup
+protection. Multiple capacitors, inductors, nonlinear devices, ideal clamps, and
+missing resistive paths return an unavailable explanation. Timing values are hidden
+when the existing safety checks suppress calculated results. No firmware behavior,
+physical switching, or safety approval rules are changed.
+
+
+### Photoresistors (LDRs)
+
+Photoresistors replace photodiodes. Use type `photoresistor`, ID such as `LDR1`,
+and positive `resistance_ohm`. Both terminals are non-polarized. The supplied
+resistance is used in DC MNA, safety analysis, RC timing, and Falstad export.
+No illumination level or ON/OFF state is fabricated. Example 10 is a 3.3 V
+voltage divider with a 10 kΩ fixed resistor and a 10 kΩ photoresistor.
+
+
+### Predicted RC response
+
+The capacitor inspector plots V(t) = Vf + (Vi − Vf) exp(−t/τ) and signed
+I(t) = (Vf − Vi)/R_th exp(−t/τ), from 0 to 5τ. A slider updates both plot
+markers and numerical values. Vi uses initial_voltage_v (explicitly labeled
+assumed zero when omitted); Vf is the solved DC capacitor voltage. Assumptions:
+instantaneous step, constant linear resistance, fixed contacts. This is an
+analytical prediction, not measured data or live simulation. Schematic DC values
+and safety approval remain unchanged. Unsupported RC networks or suppressed
+results do not display a fabricated response. No new dependencies are required.
+
+
+### Schematic RC time control
+
+For supported, safety-check-passing first-order RC circuits, a toolbar at the
+bottom of the schematic exposes a 0–5τ slider without requiring component
+selection. Moving it previews all component and node voltages, branch currents,
+and arrows using cached initial/final linear-network solutions. The initial
+solution constrains the capacitor to its specified initial voltage (zero if
+omitted); interpolation follows exp(−t/τ). This changes display data only, never
+the settled DC safety result or physical circuit. Settled DC restores normal
+readings. Loading a circuit resets the preview; warnings/errors suppress it.
+Inspector plots follow the main slider and omit their duplicate slider. The
+preview is a fixed-topology analytical step response, not hardware measurements
+or transient fault protection.
+
+
+RC timing is presented as a 1τ–5τ table: elapsed seconds and percentage of
+the total voltage transition completed, 100(1−exp(−n)). These percentages also
+apply to discharge progress; they are not the percentage of charge remaining.
+
+
+### Inductor protection: deferred
+
+Turn-off protection checks are deferred pending the hardware design. The software
+does not verify flyback diodes/clamps or calculate turn-off voltage spikes. This
+does not change settled-DC short detection through ideal inductors, supply limits,
+or existing optional rating checks.
+
+Example 13 adds a series RLC topology (3.3 V, 10 Ω, 10 mH, 100 µF). The main
+solver and safety checks remain settled DC; the analytical series-RLC preview
+now supports its changing voltage/current response. No inductor turn-off warning
+is emitted; hardware protection has not been verified by the software.
+
+
+### First-order RL preview
+
+`simulation/rl.py` supports one inductor in a fixed linear resistor/photoresistor,
+DC source, wire/contact network, with no capacitors or nonlinear devices.
+Source-suppressed equivalent resistance gives τ = L/R_eq. Inductor current follows
+I(t) = If + (Ii − If) exp(−t/τ), and voltage is R_eq(If − Ii) exp(−t/τ).
+Initial current comes from `initial_current_a` (zero if omitted). Final current
+comes from the settled DC solve. A cached initial voltage-constraint solve supplies
+all initial branch/node values; exponential interpolation updates the entire
+schematic without changing the stored DC safety result.
+
+The schematic's 0–5τ slider supports RC or RL and remains discoverable without
+selecting a component. Inductors show RL Timing (1τ–5τ table) and Predicted RL
+Response plots, following the same chevron style and selected time. The Settled DC
+button restores equilibrium readings. RLC/multiple storage, nonlinear networks,
+zero or missing resistive paths are not previewed. No flyback protection check or
+physical switching is added; this is an analytical fixed-topology prediction only.
+
+
+### Analytical series RLC preview
+
+`simulation/rlc.py` recognizes a single closed series loop containing one DC
+voltage source, one capacitor, one inductor, positive total resistance, and optional
+wires/closed contacts. Branches, open contacts, nonlinear devices, multiple
+storage elements of the same type, and disconnected subcircuits are rejected.
+Resistance is summed along the actual series path. Terminal orientation and any
+selected ground reference are preserved. Initial Vc and IL use JSON values, or
+zero when omitted. The fixed supply is applied as an ideal step.
+
+Exact exponential/sinusoidal solutions cover underdamped, critically damped and
+overdamped regimes (alpha = R/(2L), omega0 = 1/sqrt(LC)). Current, all branch
+voltages and all net voltages follow KVL/KCL. Reversed current and capacitor
+overshoot are supported. The preview is separate from the settled DC result used
+for safety approval; it does not validate transient protection or component ratings.
+
+The schematic slider uses a finite preview window in seconds, not a universal
+RLC tau or charging percentage. It spans eight slow decay times, capped at ten
+oscillation periods for very lightly damped responses. It is not a guaranteed
+settling time. Capacitor and inductor inspectors show damping type/ratio,
+oscillation frequency when applicable, and synchronized voltage/current graphs.
+First-order RC/RL tables remain limited to first-order circuits. Arbitrary RLC
+networks and switching events are not simulated. No new dependencies are needed.
+
+
+### LED model simplification
+
+The optional Falstad-compatible exponential LED model, its nonlinear solver, and
+associated tests have been removed. `solve_dc(circuit)` uses only the fixed-drop
+LED/diode model. LED input and normal UI behavior are unchanged. Falstad export
+remains available and runs independently in the external simulator.

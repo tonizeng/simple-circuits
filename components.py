@@ -3,7 +3,7 @@
 COMPONENT_NAMES = {
     "voltage_source": "DC Source", "resistor": "Resistor", "wire": "Wire",
     "led": "LED", "diode": "Diode", "switch": "Switch", "button": "Button",
-    "photodiode": "Photodiode", "capacitor": "Capacitor", "inductor": "Inductor",
+    "photoresistor": "Photoresistor", "capacitor": "Capacitor", "inductor": "Inductor",
     "potentiometer": "Potentiometer",
 }
 
@@ -15,8 +15,8 @@ COMPONENT_DESCRIPTIONS = {
     "diode": "Conducts primarily in one direction and blocks current in the reverse direction under normal conditions.",
     "switch": "Opens or closes an electrical connection.",
     "button": "Changes a connection while pressed, then returns to its normal state when released.",
-    "photodiode": "Produces a current in response to light, often while reverse biased.",
-    "capacitor": "Stores energy in an electric field and opposes changes in voltage.",
+    "photoresistor": "Resistance decreases as light increases. The circuit model uses the supplied resistance value.",
+    "capacitor": "Stores and releases electrical energy, smoothing changes in voltage. Resistors are often used to limit charging current and control charging or discharging time.",
     "inductor": "Stores energy in a magnetic field and opposes changes in current.",
     "potentiometer": "Provides an adjustable resistance using a movable wiper along a resistive track.",
 }
@@ -28,7 +28,7 @@ NUMERIC_PARAMETERS = {
     "wire": {}, "switch": {}, "button": {},
     "led": {"forward_voltage_v": (0, None, True)},
     "diode": {"forward_voltage_v": (0, None, True)},
-    "photodiode": {"photocurrent_a": (0, None, False)},
+    "photoresistor": {"resistance_ohm": (0, None, True)},
     "capacitor": {"capacitance_f": (0, None, True)},
     "inductor": {"inductance_h": (0, None, True)},
     "potentiometer": {"resistance_ohm": (0, None, True), "wiper_position": (0, 1, False)},
@@ -59,6 +59,15 @@ def engineering(value, unit):
     return f"{value:.4g} {unit}"
 
 
+def current_reading(value, mode="arrows"):
+    """Format solver current without changing its terminal-1-to-2 reference."""
+    if value is None:
+        return "—"
+    if mode == "signed":
+        return ("+" if value > 0 else "") + engineering(value, "A")
+    return engineering(abs(value), "A")
+
+
 def nominal_label(component):
     cid, kind, p = component.id, component.type, component.parameters
     fields = {"resistor": ("resistance_ohm", "Ω"),
@@ -69,8 +78,8 @@ def nominal_label(component):
         return f"{cid} = {engineering(p[field], unit)}"
     if kind in ("led", "diode"):
         return f"{cid}: Vf = {engineering(p['forward_voltage_v'], 'V')}"
-    if kind == "photodiode":
-        return f"{cid}: Iph = {engineering(p['photocurrent_a'], 'A')}"
+    if kind == "photoresistor":
+        return f"{cid} = {engineering(p['resistance_ohm'], 'Ω')}"
     if kind in ("switch", "button"):
         return f"{cid}: {'Closed' if contact_closed(component) else 'Open'}"
     if kind == "potentiometer":

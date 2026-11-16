@@ -26,6 +26,7 @@ class RenderingTests(unittest.TestCase):
 
     def test_every_example_parses_renders_and_populates_legend(self):
         window = CircuitWindow()
+        window.scene.setProperty("currentDisplay", "arrows")
         kinds = set()
         for path in sorted(EXAMPLES.glob("*.json")):
             with self.subTest(path=path.name):
@@ -41,7 +42,7 @@ class RenderingTests(unittest.TestCase):
                 self.assertEqual(sum(isinstance(i, ResultBox) for i in scene.items()), len(circuit.components))
                 for terminal in circuit.terminal_nodes():
                     self.assertIn(terminal[1], symbols[terminal[0]].terminals)
-                self.assertEqual(window.component_legend.rowCount(), 2 * len({c.type for c in circuit.components}))
+                self.assertEqual(window.component_legend.rowCount(), 2 * len(circuit.components))
                 image = QImage(1200, 600, QImage.Format.Format_ARGB32)
                 image.fill(0xffffffff)
                 painter = QPainter(image)
@@ -55,7 +56,7 @@ class RenderingTests(unittest.TestCase):
                     result = None if hidden else window.simulation_result.components.get(symbol.component.id)
                     voltage = engineering(result.voltage_v, "V") if result is not None and result.voltage_v is not None else "—"
                     current = engineering(abs(result.current_a), "A") if result is not None and result.current_a is not None else "—"
-                    self.assertEqual(output.text(), f"V: {voltage}\nI: {current}")
+                    self.assertEqual(output.text(), f"{'Voltage' if symbol.component.type == 'voltage_source' else 'Voltage drop'}: {voltage}\nCurrent: {current}")
                     symbol.result_box.highlight(True)
                     self.assertTrue(symbol.highlighted)
                     symbol.result_box.highlight(False)
@@ -64,6 +65,7 @@ class RenderingTests(unittest.TestCase):
 
     def test_current_arrows_follow_signed_results_and_rotate_with_symbols(self):
         window = CircuitWindow()
+        window.scene.setProperty("currentDisplay", "arrows")
         window.load_topology((EXAMPLES / "01_led_series.json").read_bytes())
         symbols = {item.component.id: item for item in window.scene.items()
                    if isinstance(item, ComponentSymbol)}
@@ -96,7 +98,7 @@ class RenderingTests(unittest.TestCase):
                    ("09_potentiometer_divider.json", "P1", "wiper_position", 1.5),
                    ("04_switch_led.json", "S1", "closed", "false"),
                    ("05_button_led.json", "SW1", "pressed", 1),
-                   ("10_photodiode_sensor.json", "PD1", "photocurrent_a", -1)]
+                   ("10_photoresistor_sensor.json", "LDR1", "resistance_ohm", -1)]
         for filename, cid, field, value in invalid:
             with self.subTest(filename=filename, field=field):
                 data = json.loads((EXAMPLES / filename).read_text())

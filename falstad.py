@@ -85,22 +85,6 @@ def export_falstad(circuit):
         if any(a[0] != b[0] and a[1] != b[1] for a, b in segments):
             raise FalstadExportError("Export requires orthogonal wires.")
         net_posts[net.id], net_segments[net.id] = posts, split_wires(segments, posts)
-    # A photodiode is a diode plus an opposing photocurrent source.
-    # Route that parallel source beside the diode, then validate its new taps too.
-    photo_sources = {}
-    nodes = circuit.terminal_nodes()
-    for component in circuit.components:
-        if component.type != "photodiode":
-            continue
-        a, b = terminals[(component.id, "1")], terminals[(component.id, "2")]
-        offset = (64, 0) if a[0] == b[0] else (0, 64)
-        shifted = [(point[0] + offset[0], point[1] + offset[1]) for point in (a, b)]
-        photo_sources[component.id] = shifted
-        for tid, point, extra in zip(("1", "2"), (a, b), shifted):
-            nid = nodes[(component.id, tid)]
-            net_posts[nid].add(extra)
-            net_segments[nid] = split_wires(net_segments[nid] + [(point, extra)], net_posts[nid])
-
     # Never turn distinct electrical nets into one node while snapping to grid.
     for nid, posts in net_posts.items():
         for other, segments in net_segments.items():
@@ -111,7 +95,7 @@ def export_falstad(circuit):
     for component in circuit.components:
         a, b = terminals[(component.id, "1")], terminals[(component.id, "2")]
         p = component.parameters
-        if component.type == "resistor":
+        if component.type in ("resistor", "photoresistor"):
             lines.append(record("r", a, b, 0, p["resistance_ohm"]))
         elif component.type == "voltage_source":
             lines.append(record("v", b, a, 0, 0, 40, p["voltage_v"], 0, 0, 0.5))
@@ -129,11 +113,8 @@ def export_falstad(circuit):
             lines.append(record("c", a, b, 0, p["capacitance_f"], initial, initial))
         elif component.type == "inductor":
             lines.append(record("l", a, b, 0, p["inductance_h"], p.get("initial_current_a", 0.0)))
-        elif component.type in ("diode", "photodiode"):
-            lines.append(record("d", a, b, 1, p.get("forward_voltage_v", 0.7)))
-            if component.type == "photodiode":
-                anode, cathode = photo_sources[component.id]
-                lines.append(record("i", cathode, anode, 0, p["photocurrent_a"]))
+        elif component.type == "diode":
+            lines.append(record("d", a, b, 1, p["forward_voltage_v"]))
         elif component.type == "potentiometer":
             midpoint = grid_point(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))
             wiper = terminals[(component.id, "3")]

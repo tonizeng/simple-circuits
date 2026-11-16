@@ -40,6 +40,24 @@ FORMULA_EQUATIONS = {
     ),
 }
 
+# Intrinsic component relationships for the inspector, not inferred circuit roles.
+FORMULA_EQUATIONS.update({
+    "DC voltage source": (("source_constraint", r"V_1 - V_2 = V_s", "Terminal 1 voltage minus terminal 2 voltage equals source voltage"),),
+    "Fixed-drop junction": (
+        ("junction_on", r"V = V_f", "Conducting: voltage equals forward voltage"),
+        ("junction_off", r"I = 0", "Blocking: current is zero"),
+    ),
+    "Ideal contact": (
+        ("contact_closed", r"V = 0", "Closed contact: voltage is zero"),
+        ("contact_open", r"I = 0", "Open contact: current is zero"),
+    ),
+    "Ideal wire": (("wire_voltage", r"V = 0", "An ideal wire has zero voltage difference"),),
+    "Potentiometer track": (
+        ("pot_first_track", r"R_{13} = xR", "Resistance from terminal 1 to wiper terminal 3 equals position times track resistance"),
+        ("pot_second_track", r"R_{32} = (1-x)R", "Resistance from wiper terminal 3 to terminal 2 equals one minus position times track resistance"),
+    ),
+})
+
 FORMULA_CAPTIONS = {
     "resistor_power": "For resistors:",
     "parallel_resistance": "For n resistors:",

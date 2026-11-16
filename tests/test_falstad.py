@@ -135,27 +135,15 @@ class FalstadTests(unittest.TestCase):
                     self.assertEqual(row[0], "r")
                     self.assertEqual(float(row[6]), 10000 * fraction)
 
-    def test_photodiode_current_polarity_and_parallel_connections(self):
-        for photocurrent in (0, 1e-5):
+    def test_photoresistor_exports_supplied_resistance(self):
+        for resistance in (1000, 10000, 100000):
             data = example(10)
-            data["components"][2]["parameters"]["photocurrent_a"] = photocurrent
+            data["components"][2]["parameters"]["resistance_ohm"] = resistance
             rows = [line.split() for line in export_falstad(parse_topology(data)).splitlines()]
-            diode = next(row for row in rows if row[0] == "d")
-            source = next(row for row in rows if row[0] == "i")
-            self.assertEqual(float(source[6]), photocurrent)
-            self.assertEqual(float(diode[6]), 0.7)
-            parents = {}
-            def find(point):
-                parents.setdefault(point, point)
-                if parents[point] != point:
-                    parents[point] = find(parents[point])
-                return parents[point]
-            for row in rows:
-                if row[0] == "w":
-                    parents[find(tuple(row[1:3]))] = find(tuple(row[3:5]))
-            self.assertEqual(find(tuple(source[1:3])), find(tuple(diode[3:5])))
-            self.assertEqual(find(tuple(source[3:5])), find(tuple(diode[1:3])))
-            self.assertNotEqual(find(tuple(source[1:3])), find(tuple(source[3:5])))
+            resistors = [row for row in rows if row[0] == "r"]
+            self.assertEqual(len(resistors), 2)
+            self.assertEqual(float(resistors[1][6]), resistance)
+            self.assertFalse(any(row[0] in ("d", "i") for row in rows))
 
     def test_unknown_types_are_not_silently_dropped(self):
         circuit = parse_topology(example(1))

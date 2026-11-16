@@ -1,9 +1,10 @@
 """Draggable validation cards contained within the schematic viewport."""
+from component_details import DisclosureButton
 from html import escape
 import re
 
-from PySide6.QtCore import Qt, QEvent, QPoint
-from PySide6.QtWidgets import (QVBoxLayout, QFrame, QLabel)
+from PySide6.QtCore import Qt, QEvent, QPoint, Signal, QSize
+from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QFrame, QLabel, QSizePolicy, QPushButton)
 
 
 class DragHandle(QLabel):
@@ -38,9 +39,42 @@ class DragHandle(QLabel):
             super().mouseReleaseEvent(event)
 
 
+class IssueRow(QPushButton):
+    def sizeHint(self):
+        return self.layout().sizeHint() if self.layout() else super().sizeHint()
+
+    def minimumSizeHint(self):
+        return QSize(0, self.sizeHint().height())
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self.layout().totalHeightForWidth(width)
+
+
+class IssueDisclosure(DisclosureButton):
+    """Wrap long issue titles without squeezing the chevron or message."""
+    def sizeHint(self):
+        return self.layout().sizeHint()
+
+    def minimumSizeHint(self):
+        return QSize(0, self.fontMetrics().height() + 8)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self.layout().totalHeightForWidth(width)
+
+
 class SafetyAlertsPanel(QFrame):
-    def __init__(self, parent=None):
+    issue_selected = Signal(object)
+
+    def __init__(self, parent=None, embedded=False):
         super().__init__(parent)
+        self.embedded = embedded
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setObjectName("safetyAlertsPanel")
         self.setStyleSheet("QFrame#safetyAlertsPanel { background: transparent; border: none; }")
         self.resize(320, 300)
@@ -50,7 +84,7 @@ class SafetyAlertsPanel(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self.handle = None
-        if parent is not None:
+        if parent is not None and not embedded:
             parent.installEventFilter(self)
         self.cards = layout
         self.cards.setSpacing(18)
@@ -66,7 +100,18 @@ class SafetyAlertsPanel(QFrame):
             self.move(max(0, min(position.x(), parent.width() - self.width())),
                       max(min(0, vertical_space), min(position.y(), max(0, vertical_space))))
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.embedded and hasattr(self, "cards"):
+            self.fit_within_parent()
+
     def fit_within_parent(self):
+        if self.embedded:
+            height = self.cards.totalHeightForWidth(max(1, self.width()))
+            if height < 0:
+                height = self.cards.sizeHint().height()
+            self.setFixedHeight(max(1, height + 2))
+            return
         parent = self.parentWidget()
         width = min(320, max(1, parent.width() - 16)) if parent is not None else 320
         height = self.cards.totalHeightForWidth(width)
@@ -82,12 +127,146 @@ class SafetyAlertsPanel(QFrame):
             self.fit_within_parent()
         return super().eventFilter(watched, event)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.embedded:
+            self.fit_within_parent()
+
     def showEvent(self, event):
         super().showEvent(event)
         self.fit_within_parent()
         self.raise_()
 
+    def set_compact_status(self, issues, checks_passed):
+        while self.cards.count():
+            item = self.cards.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
+                item.widget().deleteLater()
+        self.issues = tuple(issues)
+        self.cards.setSpacing(12)
+        availability_codes = {"unknown_current", "unresolved_circuit"}
+        specific_issues = [issue for issue in issues if issue.code not in availability_codes]
+        unavailable = bool(issues)
+        errors = sum(i.severity == "error" for i in specific_issues)
+        warnings = sum(i.severity == "warning" for i in specific_issues)
+        if errors:
+            headline, colour, icon = "Errors detected", "#b53e2b", "!"
+        elif warnings:
+            headline, colour, icon = "Review required", "#947119", "⚠"
+        elif issues:
+            headline, colour, icon = "Checks incomplete", "#666666", "○"
+        elif checks_passed:
+            headline, colour, icon = "Checks passed", "#51843c", "✓"
+        else:
+            headline, colour, icon = "Waiting for a circuit", "#666666", "○"
+        self.handle = QLabel(headline)
+        self.handle.setStyleSheet(f"background: transparent; color: {colour}; font-size: 14px; font-weight: bold;")
+        summary = QFrame()
+        summary.setStyleSheet("background: transparent; border: none;")
+        summary_layout = QVBoxLayout(summary)
+        summary_layout.setContentsMargins(0, 0, 0, 0)
+        summary_layout.setSpacing(6)
+        headline_row = QHBoxLayout()
+        headline_row.setSpacing(6)
+        severity_icon = QLabel(icon)
+        severity_icon.setStyleSheet(self.handle.styleSheet())
+        headline_row.addWidget(severity_icon)
+        headline_row.addWidget(self.handle, 1)
+        summary_layout.addLayout(headline_row)
+        if issues or checks_passed:
+            approval = QLabel("Power approved" if checks_passed and not issues else "Power not approved")
+            approval.setStyleSheet("background: transparent; color: #606060; font-size: 13px;")
+            summary_layout.addWidget(approval)
+        if specific_issues:
+            counts = QLabel(f"{errors} error{'s' if errors != 1 else ''} · {warnings} warning{'s' if warnings != 1 else ''}")
+            counts.setStyleSheet("background: transparent; color: #606060; font-size: 13px;")
+            summary_layout.addWidget(counts)
+        if unavailable:
+            availability = QLabel("Values cannot be fully determined. Check the circuit connections and component values.")
+            availability.setObjectName("calculationAvailability")
+            availability.setWordWrap(True)
+            availability.setStyleSheet("background: transparent; color: #606060; font-size: 13px;")
+            summary_layout.addWidget(availability)
+        self.cards.addWidget(summary)
+        titles = {
+            "supply_short": "Supply short", "overvoltage": "Supply voltage too high",
+            "predicted_overcurrent": "Current limit exceeded", "unconnected_terminal": "Disconnected terminal",
+            "source_count": "Check voltage source", "unresolved_circuit": "Values unavailable",
+            "unknown_current": "Supply current unavailable", "component_rating_exceeded": "Component rating exceeded",
+            "invalid_rating": "Invalid component rating", "unknown_rating_check": "Component rating unchecked",
+            "stale_telemetry": "Measurements out of date", "missing_telemetry": "Measurements needed",
+            "topology_mismatch": "Circuit changed", "stale_topology": "Circuit data out of date",
+            "firmware_fault": "Board fault", "invalid_topology": "Invalid circuit data",
+        }
+        if not hasattr(self, "issue_expanded"):
+            self.issue_expanded = {}
+        ordered = sorted(specific_issues, key=lambda issue: issue.severity != "error")
+        for issue in ordered:
+            background = "#fff0ed" if issue.severity == "error" else "#fff8df"
+            hover_background = "#ffe5df" if issue.severity == "error" else "#fff0bd"
+            colour = "#b53e2b" if issue.severity == "error" else "#947119"
+            row = IssueRow()
+            row.setObjectName("issueRow")
+            row.setProperty("issueCode", issue.code)
+            row.setAccessibleName(titles.get(issue.code, "Circuit check") + ": " + issue.message)
+            row.setCursor(Qt.CursorShape.PointingHandCursor)
+            row.setStyleSheet(f"QPushButton#issueRow {{ text-align: left; background: {background}; border: none; border-left: 3px solid {colour}; border-radius: 8px; padding: 0px; }} QPushButton#issueRow:hover {{ background: {hover_background}; }} QPushButton#issueRow:focus {{ border: 1px solid #787aaf; border-left: 3px solid {colour}; }}")
+            policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            policy.setHeightForWidth(True)
+            row.setSizePolicy(policy)
+            row_layout = QVBoxLayout(row)
+            row_layout.setContentsMargins(10, 8, 8, 8)
+            row_layout.setSpacing(4)
+            title = IssueDisclosure()
+            title_layout = QVBoxLayout(title)
+            title_layout.setContentsMargins(0, 4, 24, 4)
+            title_label = QLabel(titles.get(issue.code, "Circuit check"))
+            title_label.setWordWrap(True)
+            title_label.setMinimumWidth(0)
+            title_label.setStyleSheet("background: transparent; color: #222222; font-size: 14px; font-weight: 500;")
+            title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            title_layout.addWidget(title_label)
+            title_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            title_policy.setHeightForWidth(True)
+            title.setSizePolicy(title_policy)
+            title.setAccessibleName("Expand " + titles.get(issue.code, "Circuit check"))
+            title.setStyleSheet("QPushButton { background: transparent; color: #222222; font-size: 14px; font-weight: 500; text-align: left; border: none; padding: 0px; }")
+            key = (issue.code, issue.message)
+            title.setChecked(self.issue_expanded.get(key, True))
+            row_layout.addWidget(title)
+            message = issue.message
+            prefix = re.match(r"^([A-Za-z][A-Za-z0-9_]*):\s*(.*)$", message, re.DOTALL)
+            message = f"At {prefix[1]}, {prefix[2]}" if prefix else message
+            formatted = escape(message)
+            if prefix:
+                formatted = formatted.replace(escape(prefix[1]), "<b>" + escape(prefix[1]) + "</b>", 1)
+            body = QLabel(formatted)
+            body.setTextFormat(Qt.TextFormat.RichText)
+            body.setWordWrap(True)
+            body.setStyleSheet("background: transparent; color: #555555; font-size: 13px;")
+            body.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            row_layout.addWidget(body)
+            body.setVisible(title.isChecked())
+            def expand_issue(expanded, label=body, issue_key=key, issue_row=row):
+                self.issue_expanded[issue_key] = expanded
+                label.setVisible(expanded)
+                issue_row.updateGeometry()
+                self.cards.invalidate()
+                self.fit_within_parent()
+            title.toggled.connect(expand_issue)
+            row.clicked.connect(lambda checked=False, selected=issue: self.issue_selected.emit(selected))
+            self.cards.addWidget(row)
+            row.show()
+        summary.show()
+        self.cards.invalidate()
+        self.fit_within_parent()
+        self.show()
+
     def set_issues(self, issues, checks_passed=False):
+        if self.embedded:
+            self.set_compact_status(issues, checks_passed)
+            return
         while self.cards.count():
             item = self.cards.takeAt(0)
             if item.widget() is not None:
@@ -136,9 +315,10 @@ class SafetyAlertsPanel(QFrame):
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(0, 0, 0, 0)
             card_layout.setSpacing(0)
-            header = DragHandle(title, self, card)
-            header.setCursor(Qt.CursorShape.SizeAllCursor)
-            header.setToolTip("Drag to move")
+            header = QLabel(title, card) if self.embedded else DragHandle(title, self, card)
+            if not self.embedded:
+                header.setCursor(Qt.CursorShape.SizeAllCursor)
+                header.setToolTip("Drag to move")
             if self.handle is None:
                 self.handle = header
             header.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -28,25 +28,25 @@ class SettingsTests(unittest.TestCase):
         self.window.close()
         self.temp.cleanup()
 
-    def test_apply_updates_hover_glow_nodes_and_current_and_saves(self):
+    def test_apply_updates_label_tints_nodes_and_current_and_saves(self):
         colors = {"component": "#ff9900", "node": "#009999", "current": "#9900cc"}
         self.window.apply_highlight_colors(colors)
         symbol = next(s for s in self.window.scene.items() if isinstance(s, ComponentSymbol))
         symbol.result_box.highlight(True)
         self.assertEqual(symbol.result_box.pen().color().name(), colors["component"])
-        self.assertEqual(symbol.value_label.glow.color().name(), colors["component"])
+        self.assertEqual(symbol.value_label.highlight_tint.name(), colors["component"])
         self.assertEqual(symbol.value_label.brush().color().name(), "#222222")
         self.assertEqual(highlight_color(symbol, "current").name(), colors["current"])
         wire = next(s for s in self.window.scene.items() if isinstance(s, NetWire))
         wire.highlight(True)
-        self.assertEqual(wire.pen().color().name(), colors["node"])
+        self.assertEqual(wire.pen().color().name(), colors["component"])
         self.assertEqual(self.window.preferences.value("highlights/current"), colors["current"])
 
     def test_cancel_does_not_apply_chosen_color(self):
         before = dict(self.window.highlight_colors)
         def cancel(dialog):
             button = next(b for b in dialog.findChildren(QPushButton)
-                          if b.accessibleName() == "Components colour")
+                          if b.accessibleName() == "Selection colour")
             button.click()
             return QDialog.DialogCode.Rejected
         with patch("main.QColorDialog.getColor", return_value=QColor("#ff0000")), \

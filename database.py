@@ -76,6 +76,36 @@ class CircuitDatabase:
                 updated.append(current["name"])
         return updated
 
+    def upgrade_stock_photoresistor(self, folder):
+        """Replace only the exact retired bundled photodiode example, not user edits."""
+        path = Path(folder) / "10_photoresistor_sensor.json"
+        if not path.exists():
+            return False
+        current = json.loads(path.read_bytes())
+        legacy = copy.deepcopy(current)
+        legacy["name"] = "Reverse-Biased Photodiode Sensor"
+        legacy["circuit_id"] = "10_photodiode_sensor"
+        legacy["components"][2] = {"id": "PD1", "type": "photodiode",
+                                     "parameters": {"photocurrent_a": 1e-5}}
+        for net in legacy["nets"]:
+            for terminal in net["terminals"]:
+                if terminal["component_id"] == "LDR1":
+                    terminal["component_id"] = "PD1"
+        with sqlite3.connect(self.path) as connection:
+            row = connection.execute("SELECT circuit_json FROM circuits WHERE name = ?",
+                                     (legacy["name"],)).fetchone()
+            if row is None:
+                return False
+            stored = json.loads(row[0])
+            legacy_5v = copy.deepcopy(legacy)
+            legacy_5v["components"][0]["parameters"]["voltage_v"] = 5.0
+            if stored not in (legacy, legacy_5v):
+                return False
+            connection.execute("INSERT OR IGNORE INTO circuits (name, circuit_json) VALUES (?, ?)",
+                               (current["name"], json.dumps(current)))
+            connection.execute("DELETE FROM circuits WHERE name = ?", (legacy["name"],))
+        return True
+
     def import_folder(self, folder):
         return [self.save(path.read_bytes()) for path in sorted(Path(folder).glob("*.json"))]
 

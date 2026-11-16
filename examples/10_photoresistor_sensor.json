@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "circuit_id": "10_photodiode_sensor",
-  "name": "Reverse-Biased Photodiode Sensor",
+  "circuit_id": "10_photoresistor_sensor",
+  "name": "Photoresistor Voltage Divider",
   "ground_node": "n0",
   "components": [
     {
@@ -19,10 +19,10 @@
       }
     },
     {
-      "id": "PD1",
-      "type": "photodiode",
+      "id": "LDR1",
+      "type": "photoresistor",
       "parameters": {
-        "photocurrent_a": 1e-05
+        "resistance_ohm": 10000
       }
     }
   ],
@@ -35,7 +35,7 @@
           "terminal": "1"
         },
         {
-          "component_id": "PD1",
+          "component_id": "LDR1",
           "terminal": "2"
         }
       ]
@@ -44,7 +44,7 @@
       "id": "n2",
       "terminals": [
         {
-          "component_id": "PD1",
+          "component_id": "LDR1",
           "terminal": "1"
         },
         {

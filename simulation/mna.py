@@ -1,7 +1,6 @@
-"""Small-circuit DC MNA with ideal contacts and selectable LED behavior.
+"""Small-circuit DC MNA with ideal contacts and fixed-drop LED behavior.
 
-The default LED model is the introductory fixed-drop model below. The optional
-Falstad-compatible exponential model is delegated to nonlinear.py.
+LEDs use the introductory fixed-drop model below.
 Singular systems are analyzed, not regularized: only uniquely determined
 quantities are returned. LP bounds distinguish genuine results from arbitrary
 least-squares choices for floating nodes or redundant ideal branch currents.
@@ -171,19 +170,12 @@ def unique_value(ranges):
     return 0.0 if abs(value) < 1e-12 else float(value)
 
 
-def solve_dc(circuit, led_model="fixed"):
+def solve_dc(circuit):
     """Solve a parsed Circuit. Signed V/I are from terminal 1 toward terminal 2.
 
     Unsupported circuits return a status, never silently drop devices. The
     original topology is not mutated by reference selection or LED states.
-    led_model='falstad' matches the explicit-Vf Falstad export; 'fixed' preserves
-    the introductory constant-drop model for comparison.
     """
-    if led_model not in ("falstad", "fixed"):
-        raise ValueError("led_model must be 'falstad' or 'fixed'.")
-    if led_model == "falstad" and any(c.type == "led" for c in circuit.components):
-        from .nonlinear import solve_led_dc
-        return solve_led_dc(circuit)
     unsupported = sorted({c.type for c in circuit.components} - DEVICE_TYPES.keys())
     if unsupported:
         return SimulationResult("unsupported", "DC simulation not supported for: " + ", ".join(unsupported))
@@ -195,9 +187,9 @@ def solve_dc(circuit, led_model="fixed"):
         if len(sources) != 1:
             return SimulationResult("invalid", "Choose an explicit ground_node unless there is exactly one DC source.")
         ground = circuit.terminal_nodes()[(sources[0].id, "2")]
-    junctions = [c.id for c in circuit.components if c.type in ("led", "diode", "photodiode")]
+    junctions = [c.id for c in circuit.components if c.type in ("led", "diode")]
     if len(junctions) > MAX_JUNCTIONS:
-        return SimulationResult("unsupported", f"Initial solver supports at most {MAX_JUNCTIONS} diode/LED/photodiode junctions.", ground)
+        return SimulationResult("unsupported", f"Initial solver supports at most {MAX_JUNCTIONS} diode/LED junctions.", ground)
     nodes = circuit.terminal_nodes()
     ranges = {("node", net.id): [] for net in circuit.nets}
     for c in circuit.components:
@@ -242,8 +234,6 @@ def solve_dc(circuit, led_model="fixed"):
             state = "unknown" if current is None else ("on" if current > ATOL else "off")
         elif c.type in ("switch", "button"):
             state = "closed" if contact_closed(c) else "open"
-        elif c.type == "photodiode":
-            state = "illuminated" if c.parameters["photocurrent_a"] > 0 else "dark"
         elif c.type == "capacitor":
             state = "dc open circuit"
         elif c.type in ("inductor", "wire"):

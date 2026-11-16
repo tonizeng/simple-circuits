@@ -111,24 +111,6 @@ class Inductor(Wire):
     """DC equilibrium: zero voltage. Initial current is a transient condition."""
 
 
-class Photodiode(Diode):
-    """Constant photocurrent from cathode to anode, plus a forward diode."""
-    @property
-    def current_offset(self):
-        return -self.component.parameters["photocurrent_a"]
-
-    def stamp(self, system):
-        system.current_source(self.a, self.b, self.current_offset)
-        if self.active:
-            system.voltage_constraint(self.id, self.a, self.b,
-                                      self.component.parameters.get("forward_voltage_v", .7))
-
-    def inequalities(self, system):
-        if self.active:
-            return [(-system.branch_current(self.id), 0)]
-        return [(self.voltage(system), self.component.parameters.get("forward_voltage_v", .7))]
-
-
 class Potentiometer(Device):
     def __init__(self, component, nodes, active=False):
         super().__init__(component, nodes, active)
@@ -165,4 +147,4 @@ class Potentiometer(Device):
 
 DEVICE_TYPES.update({"diode": Diode, "wire": Wire, "capacitor": Capacitor,
                      "inductor": Inductor, "potentiometer": Potentiometer,
-                     "photodiode": Photodiode})
+                     "photoresistor": Resistor})

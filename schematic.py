@@ -1,16 +1,20 @@
 """Vector symbols with rectangular series-loop and fallback net-lane layouts."""
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainterPath, QPainterPathStroker, QPen, QPolygonF
-from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsDropShadowEffect
-from components import nominal_label, contact_closed, engineering
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPainterPathStroker, QPen, QPolygonF
+from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsPathItem, QGraphicsSimpleTextItem
+from components import nominal_label, contact_closed, engineering, current_reading
 from layout import series_parallel_layout, open_series_parallel_layout
 
 
-DEFAULT_HIGHLIGHT_COLORS = {"component": "#a2c96e", "node": "#787aaf", "current": "#2878b5"}
+DEFAULT_HIGHLIGHT_COLORS = {"component": "#787aaf", "node": "#787aaf", "current": "#2878b5"}
 
 
 def highlight_color(item, role):
+    owner = getattr(item, "symbol", None) or item
+    severity = getattr(owner, "diagnostic_severity", None)
+    if role in ("component", "node") and severity:
+        return QColor("#c43c25" if severity == "error" else "#d2ac20")
     scene = item.scene()
     colors = scene.property("highlightColors") if scene is not None else None
     return QColor((colors or DEFAULT_HIGHLIGHT_COLORS)[role])
@@ -81,6 +85,42 @@ def add_safety_badges(scene, symbols, issues, plan=None):
         scene.addItem(badge)
 
 
+class ResultReadout(QGraphicsSimpleTextItem):
+    """Two aligned rows; keep text() available for accessibility and inspection."""
+    def __init__(self, voltage_label, voltage, current, current_label="Current"):
+        super().__init__(f"{voltage_label}: {voltage}\n{current_label}: {current}")
+        self.rows = ((voltage_label, voltage), (current_label, current))
+        font = QFont(QApplication.font())
+        font.setPixelSize(14)
+        self.setFont(font)
+        self.value_font = QFont(font)
+        self.value_font.setWeight(QFont.Weight.Medium)
+        metrics = QFontMetricsF(font)
+        value_metrics = QFontMetricsF(self.value_font)
+        self.label_width = max(metrics.horizontalAdvance(label) for label, _ in self.rows) + 16
+        self.readout_width = self.label_width + max(value_metrics.horizontalAdvance(value) for _, value in self.rows) + 16
+        self.row_height = max(24, metrics.height() + 8)
+
+    def boundingRect(self):
+        if not hasattr(self, "readout_width"):
+            return super().boundingRect()
+        return QRectF(0, 0, self.readout_width, 2 * self.row_height)
+
+    def paint(self, painter, option, widget=None):
+        painter.save()
+        painter.setPen(QPen(QColor("#e2e2e7"), 1))
+        painter.drawLine(QPointF(0, self.row_height), QPointF(self.readout_width, self.row_height))
+        painter.drawLine(QPointF(self.label_width, 0), QPointF(self.label_width, 2 * self.row_height))
+        for index, (label, value) in enumerate(self.rows):
+            top = index * self.row_height
+            painter.setPen(QColor("#222222"))
+            painter.setFont(self.font())
+            painter.drawText(QRectF(0, top, self.label_width - 8, self.row_height), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, label)
+            painter.setFont(self.value_font)
+            painter.drawText(QRectF(self.label_width + 8, top, self.readout_width - self.label_width - 8, self.row_height), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, value)
+        painter.restore()
+
+
 class ResultBox(QGraphicsPathItem):
     """Prototype readout with a green hover border."""
 
@@ -92,7 +132,7 @@ class ResultBox(QGraphicsPathItem):
         self.highlight(False)
 
     def highlight(self, active):
-        active = active or (self.symbol is not None and self.symbol.pinned)
+        active = active or (self.symbol is not None and (self.symbol.pinned or getattr(self.symbol, "details_selected", False)))
         self.setPen(QPen(highlight_color(self, "component") if active else QColor("#888888"),
                          3 if active else 2))
         fill = QColor("#ffffff")
@@ -106,8 +146,6 @@ class ResultBox(QGraphicsPathItem):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.symbol is not None:
-                self.symbol.toggle_pin()
             event.accept()
         else:
             super().mousePressEvent(event)
@@ -121,16 +159,44 @@ class ResultBox(QGraphicsPathItem):
         super().hoverLeaveEvent(event)
 
 
-class NetLabel(QGraphicsSimpleTextItem):
+class HighlightLabel(QGraphicsSimpleTextItem):
+    """Black text over a solid tinted selection surface, without blur effects."""
+    def __init__(self, text):
+        super().__init__(text)
+        self.highlighted = False
+        self.highlight_tint = QColor("#ffffff")
+
+    def set_label_highlight(self, active, colour):
+        self.highlighted = active
+        self.highlight_tint = QColor(colour)
+        self.setBrush(QColor("#222222"))
+        self.update()
+
+    def boundingRect(self):
+        return super().boundingRect().adjusted(-4, -3, 4, 3)
+
+    def paint(self, painter, option, widget=None):
+        if self.highlighted:
+            owner = getattr(self, "symbol", getattr(self, "net", None))
+            selected = owner is not None and (owner.pinned or getattr(owner, "details_selected", False))
+            amount = .28 if selected else .14
+            colour = self.highlight_tint
+            fill = QColor(*(round(255 * (1 - amount) + channel * amount)
+                            for channel in (colour.red(), colour.green(), colour.blue())))
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(fill)
+            painter.setPen(QPen(colour, 1) if selected else QPen(Qt.PenStyle.NoPen))
+            painter.drawRoundedRect(QGraphicsSimpleTextItem.boundingRect(self).adjusted(-4, -3, 4, 3), 5, 5)
+            painter.restore()
+        super().paint(painter, option, widget)
+
+
+class NetLabel(HighlightLabel):
     def __init__(self, text, font, net):
         super().__init__(text)
         self.setFont(font)
         self.net = net
-        self.glow = QGraphicsDropShadowEffect()
-        self.glow.setOffset(0, 0)
-        self.glow.setBlurRadius(10)
-        self.glow.setEnabled(False)
-        self.setGraphicsEffect(self.glow)
         self.setAcceptHoverEvents(True)
 
     def boundingRect(self):
@@ -183,8 +249,7 @@ class NetWire(QGraphicsPathItem):
         self.setPen(QPen(color, 3 if active else 1.5))
         if self.label is not None:
             self.label.setBrush(QColor("#222222"))
-            self.label.glow.setColor(highlight_color(self, "node"))
-            self.label.glow.setEnabled(active)
+            self.label.set_label_highlight(active, highlight_color(self, "node"))
         for dot in self.dots:
             dot.setPen(QPen(color, 1.5))
             dot.setBrush(color)
@@ -209,12 +274,15 @@ class NetWire(QGraphicsPathItem):
         super().hoverLeaveEvent(event)
 
 
-def add_net(scene, path, text, x, y):
+def add_net(scene, path, text, x, y, net_id=None):
     wire = NetWire(path)
+    wire.net_id = net_id
     scene.addItem(wire)
     font = QFont(QApplication.font())
     font.setPixelSize(14)
     label = NetLabel(text, font, wire)
+    label.setData(0, "connectionLabel")
+    label.setVisible(scene.property("showConnectionLabels") is not False)
     scene.addItem(label)
     label.setPos(x, y)
     wire.label = label
@@ -223,22 +291,15 @@ def add_net(scene, path, text, x, y):
     return wire
 
 
-class ComponentLabel(QGraphicsSimpleTextItem):
+class ComponentLabel(HighlightLabel):
     """Nominal values share the symbol/result hover state."""
     def __init__(self, text, symbol):
         super().__init__(text)
         self.symbol = symbol
-        self.glow = QGraphicsDropShadowEffect()
-        self.glow.setColor(QColor("#a2c96e"))
-        self.glow.setOffset(0, 0)
-        self.glow.setBlurRadius(10)
-        self.glow.setEnabled(False)
-        self.setGraphicsEffect(self.glow)
         self.setAcceptHoverEvents(True)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.symbol.toggle_pin()
             event.accept()
         else:
             super().mousePressEvent(event)
@@ -273,28 +334,19 @@ class ComponentSymbol(QGraphicsItem):
         self.terminals = {"1": QPointF(-60, 0), "2": QPointF(60, 0)}
         if component.type == "potentiometer":
             self.terminals["3"] = QPointF(0, 50)
-        self.setToolTip(f"{component.id}: {component.type}\n1: local left, 2: local right"
-                        + ("\n3: wiper" if component.type == "potentiometer" else ""))
+
 
     def set_highlight(self, active):
-        active = active or self.pinned
+        active = active or self.pinned or getattr(self, "details_selected", False)
         self.highlighted = active
         if self.value_label is not None:
             self.value_label.setBrush(QColor("#222222"))
-            self.value_label.glow.setColor(highlight_color(self, "component"))
-            self.value_label.glow.setEnabled(active)
+            self.value_label.set_label_highlight(active, highlight_color(self, "component"))
         self.update()
-
-    def toggle_pin(self):
-        self.pinned = not self.pinned
-        if self.result_box is not None:
-            self.result_box.highlight(self.pinned)
-        else:
-            self.set_highlight(self.pinned)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.toggle_pin()
+            # The view routes selection to the shared details/list state.
             event.accept()
         else:
             super().mousePressEvent(event)
@@ -320,6 +372,8 @@ class ComponentSymbol(QGraphicsItem):
         return QRectF(-64, -55, 128, 110)
 
     def current_arrow_points(self):
+        if self.scene() is not None and self.scene().property("currentDisplay") == "signed":
+            return None
         if self.current_a is None or abs(self.current_a) <= 1e-12:
             return None
         start, end = QPointF(-56, -16), QPointF(-36, -16)
@@ -332,11 +386,14 @@ class ComponentSymbol(QGraphicsItem):
         edge = 24 if kind == "voltage_source" else 30
         painter.drawLine(QPointF(-60, 0), QPointF(-edge, 0))
         painter.drawLine(QPointF(edge, 0), QPointF(60, 0))
-        if kind in ("resistor", "potentiometer"):
+        if kind in ("resistor", "potentiometer", "photoresistor"):
             path = QPainterPath(QPointF(-30, 0))
             for x, y in [(-25, -10), (-15, 10), (-5, -10), (5, 10), (15, -10), (25, 10), (30, 0)]:
                 path.lineTo(x, y)
             painter.drawPath(path)
+            if kind == "photoresistor":
+                for dx in (-12, 4):
+                    self.draw_arrow(painter, QPointF(dx - 12, -32), QPointF(dx, -15))
             if kind == "potentiometer":
                 painter.drawLine(QPointF(0, 50), QPointF(0, 14))
                 self.draw_arrow(painter, QPointF(0, 36), QPointF(0, 14))
@@ -345,7 +402,7 @@ class ComponentSymbol(QGraphicsItem):
             painter.drawLine(QPointF(-16, 0), QPointF(-6, 0))
             painter.drawLine(QPointF(-11, -5), QPointF(-11, 5))
             painter.drawLine(QPointF(6, 0), QPointF(16, 0))
-        elif kind in ("led", "diode", "photodiode"):
+        elif kind in ("led", "diode"):
             painter.drawLine(QPointF(-30, 0), QPointF(-15, 0))
             painter.drawPolygon(QPolygonF([QPointF(-15, -14), QPointF(-15, 14), QPointF(15, 0)]))
             painter.drawLine(QPointF(15, -14), QPointF(15, 14))
@@ -353,8 +410,6 @@ class ComponentSymbol(QGraphicsItem):
             if kind != "diode":
                 for dx in (0, 12):
                     start, end = QPointF(dx, -17), QPointF(dx + 12, -32)
-                    if kind == "photodiode":
-                        start, end = end, start
                     self.draw_arrow(painter, start, end)
         elif kind == "wire":
             painter.drawLine(QPointF(-30, 0), QPointF(30, 0))
@@ -458,7 +513,7 @@ def draw_rectangular_nets(scene, circuit, symbols):
         for point in points[1:]:
             path.lineTo(point)
         suffix = " (0 V reference)" if net.id == circuit.ground_node else ""
-        wire = add_net(scene, path, net.id + suffix, 0, label_y)
+        wire = add_net(scene, path, net.id + suffix, 0, label_y, net_id=net.id)
         label = wire.label
         label.setX(label_x - label.boundingRect().width() / 2)
 
@@ -481,7 +536,7 @@ def draw_planned_nets(scene, circuit, plan):
             point = routes[0][-1]
             label_x, label_y = point[0] + 24, point[1] - 12
         suffix = " (0 V reference)" if net.id == circuit.ground_node else ""
-        wire = add_net(scene, path, net.id + suffix, label_x, label_y)
+        wire = add_net(scene, path, net.id + suffix, label_x, label_y, net_id=net.id)
         wire.setData(0, net.id)
         if horizontal:
             wire.label.setX(label_x - wire.label.boundingRect().width() / 2)
@@ -490,6 +545,8 @@ def draw_planned_nets(scene, circuit, plan):
         points = {point for route in routes for point in route}
         for x, y in points:
             dot = scene.addEllipse(x - 2, y - 2, 4, 4, wire.pen(), QColor("#555555"))
+            dot.net_wire = wire
+            dot.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             wire.dots.append(dot)
 
 
@@ -506,6 +563,13 @@ def render_circuit(scene, circuit, simulation=None, issues=()):
     placements = rectangular_layout(circuit)
     plan = None if placements else (series_parallel_layout(circuit) or open_series_parallel_layout(circuit))
     if plan is not None:
+        # A 10-unit subdivision accommodates 50-unit potentiometer terminals;
+        # the visible major grid is 20 units. Snap drawing geometry only.
+        snap = lambda value: round(value / 10) * 10
+        plan.placements = {cid: (snap(x), snap(y), rotation) for cid, (x, y, rotation) in plan.placements.items()}
+        plan.routes = {nid: [tuple((snap(x), snap(y)) for x, y in route) for route in routes]
+                       for nid, routes in plan.routes.items()}
+        plan.breaks = [(refs, (snap(point[0]), snap(point[1]))) for refs, point in plan.breaks]
         placements = plan.placements
     y = 80 + 50 * len(circuit.nets)
     for index, component in enumerate(circuit.components):
@@ -522,8 +586,6 @@ def render_circuit(scene, circuit, simulation=None, issues=()):
             scene, nominal_label(component),
             0, symbol.y() + (90 if component.type == "potentiometer" else 28), component=symbol,
         )
-        if component.type == "led" and simulation is not None:
-            label.setToolTip("Nominal LED forward voltage; the default classroom model treats this as a fixed drop while conducting.")
         if placements and symbol.rotation() in (90, 270):
             if component.type == "potentiometer":
                 label.setPos(symbol.x() - label.boundingRect().width() - 38,
@@ -537,20 +599,12 @@ def render_circuit(scene, circuit, simulation=None, issues=()):
             label.setX(symbol.x() - label.boundingRect().width() / 2)
         result = simulation.components.get(component.id) if simulation is not None and not hide_results else None
         voltage = engineering(result.voltage_v, "V") if result is not None and result.voltage_v is not None else "—"
-        current = engineering(abs(result.current_a), "A") if result is not None and result.current_a is not None else "—"
+        current_mode = scene.property("currentDisplay") or "arrows"
+        current = current_reading(result.current_a if result is not None else None, current_mode)
         symbol.current_a = result.current_a if result is not None else None
-        output = add_label(scene, f"V: {voltage}\nI: {current}", 0, 0)
-        # DC solver status messages are temporarily hidden from tooltips.
-        # message = (simulation.message if simulation.status != "solved" else "") if simulation is not None else "No simulation results supplied."
-        message = ""
-        if result is not None and result.terminal_currents_a is not None:
-            message += "\nPotentiometer I is current entering terminal 1; V is across track ends 1 and 2."
-            message += "\nTerminal currents: " + ", ".join(
-                f"{terminal}: {engineering(current, 'A') if current is not None else '—'}"
-                for terminal, current in result.terminal_currents_a.items())
-        if result is not None and result.state:
-            message += f"\nState: {result.state}"
-        output.setToolTip((message + "\nV = V1 − V2. I displays magnitude; the arrow shows conventional current direction.").strip())
+        voltage_label = "Voltage" if component.type == "voltage_source" else "Voltage drop"
+        output = ResultReadout(voltage_label, voltage, current)
+        scene.addItem(output)
         if placements:
             if component.type == "voltage_source":
                 output.setPos(symbol.x() - output.boundingRect().width() - 47,
@@ -576,7 +630,9 @@ def render_circuit(scene, circuit, simulation=None, issues=()):
         output.setZValue(2)
         for terminal in symbol.terminals:
             point = symbol.terminal_position(terminal)
-            add_label(scene, terminal, point.x() - 5, point.y() + 7)
+            terminal_label = add_label(scene, terminal, point.x() - 5, point.y() + 7)
+            terminal_label.setData(0, "connectionLabel")
+            terminal_label.setVisible(scene.property("showConnectionLabels") is not False)
     if placements:
         if plan is not None:
             draw_planned_nets(scene, circuit, plan)
@@ -587,7 +643,7 @@ def render_circuit(scene, circuit, simulation=None, issues=()):
         return symbols
     pen = QPen(QColor("#555555"), 1.5)
     for index, net in enumerate(circuit.nets):
-        lane_y = 35 + index * 50
+        lane_y = 40 + index * 50
         points = [symbols[t.component_id].terminal_position(t.terminal) for t in net.terminals]
         # Route a bottom-facing wiper around the symbol instead of through it.
         taps = [QPointF(p.x() + 90, lane_y) if t.terminal == "3"
@@ -598,13 +654,15 @@ def render_circuit(scene, circuit, simulation=None, issues=()):
         for point, tap, terminal in zip(points, taps, net.terminals):
             path.moveTo(tap)
             if terminal.terminal == "3":
-                path.lineTo(tap.x(), point.y() + 25)
-                path.lineTo(point.x(), point.y() + 25)
+                path.lineTo(tap.x(), point.y() + 20)
+                path.lineTo(point.x(), point.y() + 20)
             path.lineTo(point)
         suffix = " (0 V reference)" if net.id == circuit.ground_node else ""
-        wire = add_net(scene, path, net.id + suffix, left, lane_y - 24)
+        wire = add_net(scene, path, net.id + suffix, left, lane_y - 24, net_id=net.id)
         for point in taps:
             dot = scene.addEllipse(point.x() - 2.5, lane_y - 2.5, 5, 5, pen, QColor("#555555"))
+            dot.net_wire = wire
+            dot.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             wire.dots.append(dot)
     add_safety_badges(scene, symbols, issues)
     scene.setSceneRect(scene.itemsBoundingRect().adjusted(-30, -30, 30, 30))

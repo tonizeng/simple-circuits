@@ -59,19 +59,15 @@ class ExtendedDeviceTests(unittest.TestCase):
         self.assertAlmostEqual(result.node_voltages['n2'], 3.3/3)
         self.assertAlmostEqual(result.components['P1'].terminal_currents_a['3'], -(3.3/3)/5000)
 
-    def test_photocurrent_polarity_light_and_dark(self):
-        for photocurrent in (0, 1e-5, 2e-5):
+    def test_photoresistor_light_dependent_resistance(self):
+        for resistance in (1000, 10000, 100000):
             data = example(10)
-            data['components'][2]['parameters']['photocurrent_a'] = photocurrent
+            data['components'][2]['parameters']['resistance_ohm'] = resistance
             result = solve(data)
-            self.assertAlmostEqual(result.components['PD1'].current_a, -photocurrent)
-            self.assertAlmostEqual(result.components['R1'].voltage_v, photocurrent * 10000)
-        # Forward-biased sensor uses its default 0.7 V diode as well as the light source.
-        data = example(6)
-        data['components'][2] = {'id':'D1','type':'photodiode','parameters':{'photocurrent_a':1e-5}}
-        result = solve(data)
-        self.assertAlmostEqual(result.components['D1'].voltage_v, .7)
-        self.assertAlmostEqual(result.components['D1'].current_a, .0026)
+            current = 3.3 / (10000 + resistance)
+            self.assertAlmostEqual(result.components['LDR1'].current_a, -current)
+            self.assertAlmostEqual(result.components['R1'].voltage_v, current * 10000)
+            self.assertAlmostEqual(result.components['LDR1'].voltage_v, -current * resistance)
 
     def test_wire_voltage_and_redundant_wire_loop(self):
         data = example(12)
