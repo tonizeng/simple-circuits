@@ -745,3 +745,64 @@ The optional Falstad-compatible exponential LED model, its nonlinear solver, and
 associated tests have been removed. `solve_dc(circuit)` uses only the fixed-drop
 LED/diode model. LED input and normal UI behavior are unchanged. Falstad export
 remains available and runs independently in the external simulator.
+
+
+### New Circuit workspace
+
+The header New Circuit button creates a blank in-memory workspace named Untitled N
+and returns to the Circuit page. It clears rendered results, selected items,
+transient previews and prior approval, without deleting saved records or sending
+firmware commands. The blank workspace waits for topology; it is not an invalid
+electrical circuit, and Save is available even for empty circuits; Export requires topology.
+
+Before replacing a nonempty unsaved circuit, the app offers Save/Discard/Cancel.
+Save persists the workspace and creates a blank one only after a successful save.
+Cancel retains the current workspace. A document
+identical to its saved database record needs no prompt; selection, zoom and
+preview time do not count as edits. This is the first workspace action only; the
+board-upload choice between new/existing circuits is not wired to firmware yet.
+
+Blank workspaces can be renamed through the pencil dialog or Enter in the title.
+The name is retained in memory until the header Save button persists it. Empty
+circuits can be saved; Export remains disabled until topology is loaded. Blank names are rejected,
+and Cancel leaves the current title unchanged.
+
+
+### Rename and explicit Save
+
+The pencil dialog and Enter in the title rename only the active workspace,
+including its in-memory document. They never write to SQLite. Header Save persists
+the current title and topology; empty components/nets are valid saved workspaces.
+Reopening an empty record shows the waiting state, hides Circuit Overview and
+does not grant power or report an invalid electrical circuit. Library thumbnails
+label such records Empty circuit. A loaded saved record keeps its original storage
+identity until Save atomically renames that record; duplicate names never silently
+overwrite another circuit. Unsaved rename/topology changes trigger Save/Discard/
+Cancel before New Circuit. Display-only changes do not.
+
+
+The header circuit title is now read-only, uses an arrow cursor and takes no
+keyboard focus. Only the pencil opens the editable Rename dialog. Renaming still
+changes memory only; the header Save button persists the workspace.
+
+
+### My Circuits and default Circuit Library
+
+Circuit Library reads only bundled JSON files under examples/ (including diagnostic
+subfolders), in filename order. Browsing or opening examples never seeds or writes
+SQLite. Opening an example establishes a clean baseline without a personal-record
+identity. Header Save creates/updates a user-owned record in My Circuits, including
+empty circuits and copies of examples. Bundled examples are never modified by Save.
+
+My Circuits is a separate scrollable page, using generated schematic previews and
+Open circuit controls. Empty records show Empty circuit and reopen as waiting
+workspaces. Rename stays in memory until Save, which updates the user's record
+atomically. Different user records with the same name cannot silently overwrite
+one another. A personal circuit may share a bundled example's display name.
+
+SQLite origin metadata distinguishes user records from legacy imported examples.
+On upgrading an old schema, exact bundled/recognized legacy stock documents are
+marked example and hidden from My Circuits; customized records remain user. No
+records are deleted by classification. Previously saved exact stock copies are
+indistinguishable from auto-imports in the old schema; Save explicitly promotes a
+copy to user origin. New saves always have user origin.

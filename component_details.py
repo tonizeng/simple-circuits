@@ -17,18 +17,19 @@ from simulation.rc import rc_timing, rc_response_phase
 from rc_response_ui import RCResponseWidget
 
 # Inspector colours: edit these to adjust the purple-grey tint.
-PANEL_BACKGROUND = "#edf4f2"
-ACCENT_BACKGROUND = "#ffffff"
-HOVER_BACKGROUND = "#dedede"
+PANEL_BACKGROUND = "#fdfefe"
+ACCENT_BACKGROUND = "#e2ebe9"
+HOVER_BACKGROUND = "#e3ede9"
 
-OVERVIEW_ROW_STYLE = "QPushButton { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #fafcfc); color: #111111; border: 1px solid #bccbc9; border-radius: 10px; margin: 3px 0px; text-align: left; } QPushButton:hover { background: #f7f9f9; border-color: #c9d4d3; } QPushButton:checked { background: #dedede; border-color: #aab6b5; }"
+OVERVIEW_ROW_STYLE = "QPushButton { background: #e2ebe9; color: #111111; border: none; border-radius: 10px; margin: 3px 0px; text-align: left; } QPushButton:hover { background: #f7f9f9; border-color: #c9d4d3; } QPushButton:checked { background: #e7e3f3; border-color: #aab6b5; }"
 
 
 def add_list_row_shadow(widget):
+    """A faint shadow to separate inner surfaces from the panel."""
     shadow = QGraphicsDropShadowEffect(widget)
     shadow.setBlurRadius(6)
     shadow.setOffset(0, 1)
-    shadow.setColor(QColor(0, 0, 0, 18))
+    shadow.setColor(QColor(26, 49, 55, 16))
     widget.setGraphicsEffect(shadow)
 
 
@@ -103,23 +104,23 @@ class ComponentDetailsPanel(QFrame):
         self.setMaximumWidth(280)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.setStyleSheet("""
-            QFrame#componentDetailsPanel { background: #f5f5f5; border: 1.2px solid #cccccc; border-radius: 14px; }
-            QFrame#componentDetailsPanel QWidget { font-family: "Ulagadi Sans"; font-size: 14px; }
+            QFrame#componentDetailsPanel { background: #f5f5f5; border: none; border-radius: 14px; }
+            QFrame#componentDetailsPanel QWidget { font-family: "DM Sans"; font-size: 14px; }
             QLabel { background: transparent; color: #161616; }
             QLabel#inspectorEyebrow { font-size: 11px; color: #777777; font-weight: 500; }
-            QFrame#componentDetailsPanel QLabel#componentTitle { font-size: 16px; font-weight: bold; color: #111111; background: transparent; padding: 0px; }
-            QLabel#secondaryText { color: #444444; font-size: 14px; }
-            QLabel#primaryReading { font-size: 16px; font-weight: 500; }
-            QFrame#componentDetailsPanel QLabel#metricReading { font-size: 16px; font-weight: bold; }
-            QFrame#componentDetailsPanel QLabel#electricalHeading { color: #3f4288; font-size: 14.5px; font-weight: bold; }
-            QLabel#sectionTitle { font-size: 14.5px; font-weight: bold; }
-            QFrame#primarySurface { background: #f6f6f6; border: 1px solid #c7d3d1; border-radius: 12px; }
+            QFrame#componentDetailsPanel QLabel#componentTitle { font-family: "Space Grotesk"; font-size: 16px; font-weight: 600; color: #111111; background: transparent; padding: 0px; }
+            QLabel#secondaryText { color: #596e6b; font-size: 14px; }
+            QLabel#primaryReading { font-size: 16px; font-weight: 600; }
+            QFrame#componentDetailsPanel QLabel#metricReading { font-size: 16px; font-weight: 600; }
+            QFrame#componentDetailsPanel QLabel#electricalHeading { font-family: "DM Sans"; color: #42447a; font-size: 14.5px; font-weight: 600; }
+            QLabel#sectionTitle { font-family: "DM Sans"; font-size: 14.5px; font-weight: 600; }
+            QFrame#primarySurface { background: #f6f6f6; border: none; border-radius: 12px; }
             QFrame#equationSurface { background: transparent; border: none; border-radius: 12px; }
-            QFrame#symbolSurface { background: #ffffff; border: 1px solid #c7d3d1; border-radius: 12px; }
+            QFrame#symbolSurface { background: #e2ebe9; border: none; border-radius: 12px; }
             QFrame#thinDivider { background: #eeeeee; border: none; }
-            QPushButton { background: transparent; border: none; padding: 4px; color: #222222; }
+            QPushButton { font-family: "DM Sans"; font-weight: 500; background: transparent; border: none; padding: 4px; color: #222222; }
             QPushButton:hover { background: #eeeeee; border-radius: 6px; }
-            QPushButton#inspectorDisclosure { text-align: left; font-weight: 500; padding: 8px 24px 8px 0px; }
+            QPushButton#inspectorDisclosure { text-align: left; font-weight: 500; padding: 0px 24px 0px 0px; }
         """.replace("#f5f5f5", PANEL_BACKGROUND)
             .replace("#f6f6f6", ACCENT_BACKGROUND)
             .replace("#eeeeee", HOVER_BACKGROUND))
@@ -134,23 +135,20 @@ class ComponentDetailsPanel(QFrame):
         self.header_timer.setSingleShot(True)
         self.header_timer.timeout.connect(self.fit_header_text)
         outer_shadow = QGraphicsDropShadowEffect(self)
-        outer_shadow.setBlurRadius(14)
+        outer_shadow.setBlurRadius(18)
         outer_shadow.setOffset(0, 0)
-        outer_shadow.setColor(QColor(0, 0, 0, 28))
+        outer_shadow.setColor(QColor(26, 49, 55, 65))
         self.setGraphicsEffect(outer_shadow)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 8, 16)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
         self.selection_prompt = text_label("Select a component or node to learn more.", role="secondaryText")
         identity = QHBoxLayout()
         identity.setSpacing(8)
+        identity.setContentsMargins(0, 0, 0, 0)
         self.symbol_surface = QFrame()
         self.symbol_surface.setObjectName("symbolSurface")
-        symbol_shadow = QGraphicsDropShadowEffect(self.symbol_surface)
-        symbol_shadow.setBlurRadius(8)
-        symbol_shadow.setOffset(0, 2)
-        symbol_shadow.setColor(QColor(0, 0, 0, 18))
-        self.symbol_surface.setGraphicsEffect(symbol_shadow)
+        add_list_row_shadow(self.symbol_surface)
         self.symbol_surface.setFixedSize(64, 56)
         symbol_layout = QVBoxLayout(self.symbol_surface)
         symbol_layout.setContentsMargins(4, 4, 4, 4)
@@ -163,6 +161,7 @@ class ComponentDetailsPanel(QFrame):
         names.setContentsMargins(0, 0, 0, 0)
         names.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.title = text_label("Circuit details", role="componentTitle")
+        self.title.setMinimumHeight(24)
         names.addWidget(self.title)
         self.subtitle = text_label("", role="secondaryText")
         names.addWidget(self.subtitle)
@@ -173,7 +172,7 @@ class ComponentDetailsPanel(QFrame):
         self.close_button.setAccessibleName("Back to circuit overview")
         self.close_button.setToolTip("Back to circuit overview")
         self.close_button.clicked.connect(self.close_or_clear)
-        identity.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
+        self.close_button.hide()
         layout.addLayout(identity)
         header_divider = QFrame()
         header_divider.setObjectName("thinDivider")
@@ -233,7 +232,7 @@ class ComponentDetailsPanel(QFrame):
             self.clear_requested.emit()
 
     def clear_selection(self):
-        self.close_button.show()
+        self.close_button.hide()
         self.close_button.setAccessibleName("Hide Circuit Overview")
         self.component_id = None
         self.node_id = None
@@ -250,7 +249,7 @@ class ComponentDetailsPanel(QFrame):
         button.setObjectName("inspectorDisclosure")
         if accented:
             button.setStyleSheet("""
-                QPushButton { color: #3f4288; font-size: 14.5px; font-weight: bold; text-align: left; padding: 8px 24px 8px 0px; background: transparent; border: none; }
+                QPushButton { font-family: "DM Sans"; color: #42447a; font-size: 14.5px; font-weight: 600; text-align: left; padding: 0px 24px 0px 0px; background: transparent; border: none; }
                 QPushButton:hover, QPushButton:pressed, QPushButton:checked, QPushButton:focus { background: transparent; border: none; }
             """)
         button.setCheckable(True)
@@ -278,7 +277,7 @@ class ComponentDetailsPanel(QFrame):
         self.component_id = None
         self.node_id = net.id
         self.selection_prompt.hide()
-        self.close_button.show()
+        self.close_button.hide()
         self.close_button.setAccessibleName("Back to circuit overview")
         is_ground = net.id == ground_node
         self.title.setText(f"{net.id} · {'Ground' if is_ground else 'Node'}")
@@ -351,11 +350,7 @@ class ComponentDetailsPanel(QFrame):
     def electrical_properties(self, column, parent, caption, nominal, voltage_caption, voltage, current):
         primary = QFrame(parent)
         primary.setObjectName("primarySurface")
-        value_shadow = QGraphicsDropShadowEffect(primary)
-        value_shadow.setBlurRadius(8)
-        value_shadow.setOffset(0, 2)
-        value_shadow.setColor(QColor(0, 0, 0, 18))
-        primary.setGraphicsEffect(value_shadow)
+        add_list_row_shadow(primary)
         primary_layout = QVBoxLayout(primary)
         primary_layout.setContentsMargins(12, 12, 12, 12)
         primary_layout.setSpacing(4)
@@ -405,25 +400,28 @@ class ComponentDetailsPanel(QFrame):
                 header.setContentsMargins(0, 0, 0, 0)
                 header.setSpacing(8)
                 row = QHBoxLayout()
-                heading = text_label(title)
-                heading.setStyleSheet("color: #3f4288; font-weight: bold; background: transparent;")
+                heading = DisclosureButton("#42447a")
+                heading.setText(f"{title} ({count})")
+                heading.setCheckable(True)
+                heading.setChecked(self.expanded_sections.get(("overview", title), True))
+                heading.setAccessibleName("Toggle " + title.lower())
+                heading.setStyleSheet("font-family: 'DM Sans'; color: #42447a; font-weight: 600; background: transparent; border: none; text-align: left; padding: 0px 24px 0px 0px;")
                 row.addWidget(heading, 1)
-                number = text_label(str(count), role="secondaryText")
-                number.setAccessibleName(f"{count} {title.lower()}")
-                number.setAlignment(Qt.AlignmentFlag.AlignRight)
-                row.addWidget(number)
                 header.addLayout(row)
                 line = QFrame(content)
                 line.setFixedHeight(1)
                 line.setStyleSheet("background: #d9e2e1; border: none;")
                 header.addWidget(line)
                 column.addLayout(header)
-            section_heading("Components", len(circuit.components))
+                return heading
+            components_heading = section_heading("Components", len(circuit.components))
             if self.component_list is not None:
                 self.component_list.setStyleSheet("QTableWidget { background: transparent; border: none; }")
                 column.addWidget(self.component_list)
-                self.component_list.show()
-            section_heading("Nodes", len(circuit.nets))
+                self.component_list.setVisible(components_heading.isChecked())
+                components_heading.toggled.connect(self.component_list.setVisible)
+                components_heading.toggled.connect(lambda checked: self.expanded_sections.__setitem__(("overview", "Components"), checked))
+            nodes_heading = section_heading("Nodes", len(circuit.nets))
             nodes = QWidget(content)
             nodes.setStyleSheet("background: transparent;")
             node_layout = QVBoxLayout(nodes)
@@ -463,6 +461,9 @@ class ComponentDetailsPanel(QFrame):
                 button.clicked.connect(lambda checked=False, node_id=net.id: self.node_requested.emit(node_id))
                 node_layout.addWidget(button)
             column.addWidget(nodes)
+            nodes.setVisible(nodes_heading.isChecked())
+            nodes_heading.toggled.connect(nodes.setVisible)
+            nodes_heading.toggled.connect(lambda checked: self.expanded_sections.__setitem__(("overview", "Nodes"), checked))
         if component is not None:
             if getattr(self, "rc_preview_position", None) is not None:
                 column.addWidget(text_label("Predicted values at the selected time", role="secondaryText"))
@@ -470,7 +471,7 @@ class ComponentDetailsPanel(QFrame):
             self.component_id = component.id
             self.title.setText(f"{component.id} · {COMPONENT_NAMES[component.type]}")
             self.selection_prompt.hide()
-            self.close_button.show()
+            self.close_button.hide()
             self.close_button.setAccessibleName("Back to circuit overview")
             self.subtitle.setText(TYPE_SUBTITLES[component.type])
             self.subtitle.show()
@@ -567,7 +568,7 @@ class ComponentDetailsPanel(QFrame):
                         progress_heading = {"charging": "Current rise", "discharging": "Current decay", "transition": "Current change", "steady": "Current change"}[phase]
                     table = QFrame(content)
                     table.setObjectName("rcTimingTable")
-                    table.setStyleSheet("QFrame#rcTimingTable { background: #f7faf9; border: 1px solid #cbd7d4; border-radius: 10px; } QLabel { background: transparent; font-size: 12px; padding: 4px 0px; }")
+                    table.setStyleSheet("QFrame#rcTimingTable { background: #f7faf9; border: none; border-radius: 10px; } QLabel { background: transparent; font-size: 12px; padding: 4px 0px; }")
                     table_layout = QGridLayout(table)
                     table_layout.setContentsMargins(8, 8, 8, 8)
                     table_layout.setHorizontalSpacing(8)

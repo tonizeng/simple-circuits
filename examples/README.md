@@ -33,11 +33,11 @@ python main.py examples/incomplete/04_switch_led_incomplete.json
 
 Both also appear in **Circuit Library** after the complete examples. They are
 rendering/diagnostic samples; Falstad export does not support these incomplete
-layouts. Existing library records are preserved when these samples are added.
+layouts. Circuit Library reads these bundled files directly.
 
 All example sources use **3.3 V**, matching the configured supply maximum.
 Checks assume settled DC; capacitor/inductor startup and turn-off are not assessed.
-Live protection belongs to firmware/hardware. Existing unmodified library examples upgrade automatically.
+Live protection belongs to firmware/hardware. Saving an example creates a personal copy in My Circuits.
 
 ## error circuit
 
@@ -50,7 +50,6 @@ example; no malformed JSON is needed.
 
 ```sh
 python main.py examples/01_led_series.json
-python database.py --import-examples examples
 ```
 
 Or click **Circuit Library** in the app. Switch/button states come from JSON,
@@ -98,3 +97,4 @@ Example 08 supports a local first-order RL time preview: τ = 100 µs for
 10 mH / 100 Ω. Use the schematic slider for predicted voltage/current changes;
 select L1 for timing and plots. Example 13 also supports an analytical series-RLC time preview.
 - 2026-11-16 — changed ui
+- 2026-11-23 — modernize ui

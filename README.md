@@ -22,7 +22,7 @@ On Windows, create the environment with `python` and activate it with
 - Eleven 3.3 V circuit examples, vector symbols, component legends, hover highlights,
   and Guide/Formulas tabs for reading results and equation references.
 - DC steady-state MNA for all 11 examples; Falstad export for all bundled examples.
-- SQLite circuit library; an empty database is seeded automatically.
+- Read-only bundled Circuit Library; saved user circuits are stored in SQLite under My Circuits.
 - Current magnitude and direction arrows; unknown results display `—`.
 - Pre-power checks against 3.3 V / 1.5 A, with short detection and automatic
   Error/Warning cards in a draggable panel inside the schematic. The board requests approval; firmware owns power and cutoff.
@@ -43,7 +43,6 @@ integration, UI saving, and transient simulation remain pending.
 
 ```sh
 python main.py examples/01_led_series.json
-python database.py --import-examples examples
 python falstad.py examples/01_led_series.json --output led-falstad.txt
 python -m unittest discover -s tests
 ```
@@ -68,10 +67,9 @@ README update entries and lowercase commit messages. The hook appends entries wh
 
 ## references
 
-[Falstad Circuit Simulator](https://www.falstad.com/circuit/) by Paul Falstad,
-and [CircuitJS1](https://github.com/sharpie7/circuitjs1), adapted for the browser
-by Iain Sharp, are references for export formats. This app exports circuit data
-to CircuitJS; its local fixed-drop solver runs independently.
+[Falstad Circuit Simulator](https://www.falstad.com/circuit/) is the external
+simulator opened by the export feature. Circuit calculations run locally in
+Python.
 
 ## updates
 
@@ -83,3 +81,4 @@ to CircuitJS; its local fixed-drop solver runs independently.
 - 2026-11-01 — ui updates
 - 2026-11-12 — add circuit validation logic
 - 2026-11-16 — changed ui
+- 2026-11-23 — modernize ui

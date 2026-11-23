@@ -18,11 +18,49 @@ class CircuitDatabase:
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS circuits (
                     name TEXT PRIMARY KEY NOT NULL,
-                    circuit_json TEXT NOT NULL
+                    circuit_json TEXT NOT NULL,
+                    origin TEXT NOT NULL DEFAULT 'user'
                 )
             """)
 
-    def save(self, data):
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(circuits)")}
+            if "origin" not in columns:
+                connection.execute("ALTER TABLE circuits ADD COLUMN origin TEXT NOT NULL DEFAULT 'legacy'")
+            self._classify_legacy_records(connection)
+
+    def _classify_legacy_records(self, connection):
+        """Keep legacy records; hide exact stock copies from personal circuits."""
+        rows = connection.execute("SELECT name, circuit_json FROM circuits WHERE origin = 'legacy'").fetchall()
+        if not rows:
+            return
+        stock = []
+        folder = Path(__file__).resolve().parent / "examples"
+        for path in sorted(folder.rglob("*.json")):
+            data = json.loads(path.read_bytes())
+            stock.append(data)
+            legacy = copy.deepcopy(data)
+            for c in legacy.get("components", []):
+                if c["type"] == "voltage_source":
+                    c["parameters"]["voltage_v"] = 5.0
+            stock.append(legacy)
+            if data.get("circuit_id") == "10_photoresistor_sensor":
+                retired = copy.deepcopy(data)
+                retired.update(name="Reverse-Biased Photodiode Sensor", circuit_id="10_photodiode_sensor")
+                retired["components"][2] = {"id": "PD1", "type": "photodiode", "parameters": {"photocurrent_a": 1e-5}}
+                for net in retired["nets"]:
+                    for t in net["terminals"]:
+                        if t["component_id"] == "LDR1": t["component_id"] = "PD1"
+                stock.append(retired)
+                old_voltage = copy.deepcopy(retired)
+                old_voltage["components"][0]["parameters"]["voltage_v"] = 5.0
+                stock.append(old_voltage)
+        for name, raw in rows:
+            data = json.loads(raw)
+            origin = "example" if any(data == sample for sample in stock) else "user"
+            connection.execute("UPDATE circuits SET origin = ? WHERE name = ?", (origin, name))
+
+    def save(self, data, origin="user"):
+
         """Save JSON contents, replacing a record with the same circuit name.
 
         Storage checks JSON structure/name only, independent of renderer support.
@@ -38,10 +76,26 @@ class CircuitDatabase:
         contents = json.dumps(data, allow_nan=False)
         with sqlite3.connect(self.path) as connection:
             connection.execute(
-                "INSERT INTO circuits (name, circuit_json) VALUES (?, ?) "
-                "ON CONFLICT(name) DO UPDATE SET circuit_json = excluded.circuit_json",
-                (name, contents),
+                "INSERT INTO circuits (name, circuit_json, origin) VALUES (?, ?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET circuit_json = excluded.circuit_json, origin = excluded.origin",
+                (name, contents, origin),
             )
+        return name
+
+    def save_workspace(self, data, previous_name=None):
+        """Save a workspace and atomically rename its own record without collisions."""
+        if not isinstance(data, dict) or not isinstance(data.get("name"), str) or not data["name"].strip():
+            raise ValueError("Circuit name cannot be empty.")
+        name = data["name"]
+        contents = json.dumps(data, allow_nan=False)
+        with sqlite3.connect(self.path) as connection:
+            existing = connection.execute("SELECT circuit_json, origin FROM circuits WHERE name = ?", (name,)).fetchone()
+            if existing and existing[1] == "user" and previous_name != name and json.loads(existing[0]) != data:
+                raise ValueError("That name already exists. Choose another name.")
+            connection.execute("INSERT INTO circuits (name, circuit_json, origin) VALUES (?, ?, 'user') "
+                               "ON CONFLICT(name) DO UPDATE SET circuit_json = excluded.circuit_json, origin = 'user'", (name, contents))
+            if previous_name is not None and previous_name != name:
+                connection.execute("DELETE FROM circuits WHERE name = ?", (previous_name,))
         return name
 
     def load(self, name):
@@ -53,11 +107,13 @@ class CircuitDatabase:
             raise KeyError(name)
         return json.loads(row[0])
 
-    def list_names(self):
+    def list_names(self, origin=None):
         with sqlite3.connect(self.path) as connection:
-            return [row[0] for row in connection.execute(
-                "SELECT name FROM circuits ORDER BY name COLLATE NOCASE"
-            )]
+            if origin is None:
+                rows = connection.execute("SELECT name FROM circuits ORDER BY name COLLATE NOCASE")
+            else:
+                rows = connection.execute("SELECT name FROM circuits WHERE origin = ? ORDER BY name COLLATE NOCASE", (origin,))
+            return [row[0] for row in rows]
 
     def upgrade_stock_sources(self, folder):
         """Upgrade exact legacy 5 V bundled records, preserving customized circuits."""
@@ -107,7 +163,7 @@ class CircuitDatabase:
         return True
 
     def import_folder(self, folder):
-        return [self.save(path.read_bytes()) for path in sorted(Path(folder).glob("*.json"))]
+        return [self.save(path.read_bytes(), origin="example") for path in sorted(Path(folder).glob("*.json"))]
 
 
 def main():

@@ -59,7 +59,7 @@ class IssueDisclosure(DisclosureButton):
         return self.layout().sizeHint()
 
     def minimumSizeHint(self):
-        return QSize(0, self.fontMetrics().height() + 8)
+        return QSize(0, self.fontMetrics().height())
 
     def hasHeightForWidth(self):
         return True
@@ -151,43 +151,52 @@ class SafetyAlertsPanel(QFrame):
         errors = sum(i.severity == "error" for i in specific_issues)
         warnings = sum(i.severity == "warning" for i in specific_issues)
         if errors:
-            headline, colour, icon = "Errors detected", "#b53e2b", "!"
+            headline, colour, icon = "Errors Detected ⊗", "#b53e2b", "!"
         elif warnings:
-            headline, colour, icon = "Review required", "#947119", "⚠"
+            headline, colour, icon = "Review Required ⚠", "#947119", "⚠"
         elif issues:
-            headline, colour, icon = "Checks incomplete", "#666666", "○"
+            headline, colour, icon = "Checks Incomplete", "#666666", "○"
         elif checks_passed:
-            headline, colour, icon = "Checks passed", "#51843c", "✓"
+            headline, colour, icon = "Checks Passed ✓", "#51843c", "✓"
         else:
-            headline, colour, icon = "Waiting for a circuit", "#666666", "○"
+            headline, colour, icon = "Waiting for a Circuit", "#666666", "○"
         self.handle = QLabel(headline)
-        self.handle.setStyleSheet(f"background: transparent; color: {colour}; font-size: 14px; font-weight: bold;")
+        self.handle.setStyleSheet(f"font-family: 'DM Sans'; background: transparent; color: {colour}; font-size: 14px; font-weight: 600;")
         summary = QFrame()
-        summary.setStyleSheet("background: transparent; border: none;")
+        summary.setObjectName("checksPowerSummary")
+        summary.setStyleSheet("QFrame#checksPowerSummary { background: #ffffff; border: none; border-radius: 10px; }")
         summary_layout = QVBoxLayout(summary)
-        summary_layout.setContentsMargins(0, 0, 0, 0)
-        summary_layout.setSpacing(6)
+        summary_layout.setContentsMargins(12, 12, 12, 12)
+        summary_layout.setSpacing(3)
         headline_row = QHBoxLayout()
         headline_row.setSpacing(6)
-        severity_icon = QLabel(icon)
-        severity_icon.setStyleSheet(self.handle.styleSheet())
-        headline_row.addWidget(severity_icon)
+        self.handle.setWordWrap(True)
+        headline_row.setContentsMargins(0, 0, 0, 0)
         headline_row.addWidget(self.handle, 1)
         summary_layout.addLayout(headline_row)
         if issues or checks_passed:
             approval = QLabel("Power approved" if checks_passed and not issues else "Power not approved")
-            approval.setStyleSheet("background: transparent; color: #606060; font-size: 13px;")
+            approval.setStyleSheet("font-family: 'DM Sans'; background: transparent; color: #596763; font-size: 14px; font-weight: 400;")
+            approval.setWordWrap(True)
+            approval.setContentsMargins(0, 0, 0, 0)
             summary_layout.addWidget(approval)
         if specific_issues:
-            counts = QLabel(f"{errors} error{'s' if errors != 1 else ''} · {warnings} warning{'s' if warnings != 1 else ''}")
-            counts.setStyleSheet("background: transparent; color: #606060; font-size: 13px;")
+            count_parts = []
+            count_labels = []
+            if errors:
+                label = f"{errors} error{'s' if errors != 1 else ''}"
+                count_parts.append(f'<span style="color: #b53e2b;">{label}</span>')
+                count_labels.append(label)
+            if warnings:
+                label = f"{warnings} warning{'s' if warnings != 1 else ''}"
+                count_parts.append(f'<span style="color: #947119;">{label}</span>')
+                count_labels.append(label)
+            counts = QLabel(" &nbsp;&nbsp; ".join(count_parts))
+            counts.setAccessibleName(", ".join(count_labels))
+            counts.setWordWrap(True)
+            counts.setStyleSheet("background: transparent; color: #606060; font-family: 'DM Sans'; font-size: 13px;")
+            counts.setContentsMargins(0, 0, 0, 0)
             summary_layout.addWidget(counts)
-        if unavailable:
-            availability = QLabel("Values cannot be fully determined. Check the circuit connections and component values.")
-            availability.setObjectName("calculationAvailability")
-            availability.setWordWrap(True)
-            availability.setStyleSheet("background: transparent; color: #606060; font-size: 13px;")
-            summary_layout.addWidget(availability)
         self.cards.addWidget(summary)
         titles = {
             "supply_short": "Supply short", "overvoltage": "Supply voltage too high",
@@ -199,6 +208,7 @@ class SafetyAlertsPanel(QFrame):
             "topology_mismatch": "Circuit changed", "stale_topology": "Circuit data out of date",
             "firmware_fault": "Board fault", "invalid_topology": "Invalid circuit data",
         }
+        titles = {code: title.title() for code, title in titles.items()}
         if not hasattr(self, "issue_expanded"):
             self.issue_expanded = {}
         ordered = sorted(specific_issues, key=lambda issue: issue.severity != "error")
@@ -211,7 +221,7 @@ class SafetyAlertsPanel(QFrame):
             row.setProperty("issueCode", issue.code)
             row.setAccessibleName(titles.get(issue.code, "Circuit check") + ": " + issue.message)
             row.setCursor(Qt.CursorShape.PointingHandCursor)
-            row.setStyleSheet(f"QPushButton#issueRow {{ text-align: left; background: {background}; border: none; border-left: 3px solid {colour}; border-radius: 8px; padding: 0px; }} QPushButton#issueRow:hover {{ background: {hover_background}; }} QPushButton#issueRow:focus {{ border: 1px solid #787aaf; border-left: 3px solid {colour}; }}")
+            row.setStyleSheet(f"QPushButton#issueRow {{ text-align: left; background: {background}; border: none; border-left: 3px solid {colour}; border-radius: 8px; padding: 0px; }} QPushButton#issueRow:hover {{ background: {hover_background}; }} QPushButton#issueRow:focus {{ border: none; border-left: 3px solid {colour}; }}")
             policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             policy.setHeightForWidth(True)
             row.setSizePolicy(policy)
@@ -220,7 +230,7 @@ class SafetyAlertsPanel(QFrame):
             row_layout.setSpacing(4)
             title = IssueDisclosure()
             title_layout = QVBoxLayout(title)
-            title_layout.setContentsMargins(0, 4, 24, 4)
+            title_layout.setContentsMargins(0, 0, 24, 0)
             title_label = QLabel(titles.get(issue.code, "Circuit check"))
             title_label.setWordWrap(True)
             title_label.setMinimumWidth(0)

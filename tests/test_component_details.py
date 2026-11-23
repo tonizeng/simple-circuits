@@ -56,7 +56,7 @@ class InspectorTests(unittest.TestCase):
 
     def test_empty_inspector_is_neutral_and_shows_selection_prompt(self):
         self.assertFalse(hasattr(self.panel, "help_button"))
-        self.assertFalse(self.panel.close_button.isHidden())
+        self.assertTrue(self.panel.close_button.isHidden())
         self.assertFalse(self.panel.selection_prompt.isHidden())
         self.assertNotIn("No component selected", self.text())
         self.assertEqual(self.panel.title.text(), "Circuit Overview")

@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 from dataclasses import replace, asdict
 
-from PySide6.QtCore import Qt, QSize, QRectF, QUrl, QPoint, QSettings, QTimer, Signal, QObject, QEvent
+from PySide6.QtCore import Qt, QSize, QRectF, QUrl, QPoint, QSettings, QTimer, Signal, QObject, QEvent, QVariantAnimation, QEasingCurve
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtGui import QFont, QFontDatabase, QPainter, QPixmap, QDesktopServices, QColor, QIcon, QPen, QLinearGradient, QCursor, QPalette
@@ -18,7 +18,7 @@ from schematic import render_circuit, ComponentSymbol, NetWire, DEFAULT_HIGHLIGH
 from components import COMPONENT_NAMES, COMPONENT_DESCRIPTIONS, nominal_label
 from database import CircuitDatabase
 from formula_reference import FORMULA_TOPICS, FORMULA_EQUATIONS, FORMULA_CAPTIONS
-from simulation import solve_dc
+from simulation import solve_dc, SimulationResult
 from simulation.rlc import series_rlc
 from simulation.rl import rl_timing, rl_step_endpoints
 from simulation.rc import rc_timing, rc_step_endpoints, rc_step_snapshot, rc_response_phase
@@ -64,7 +64,7 @@ class IconTextButton(QPushButton):
         size = super().sizeHint()
         if self.objectName() == "headerActionButton":
             self.ensurePolished()
-            size.setWidth(self.fontMetrics().horizontalAdvance(self.text()) + self.iconSize().width() + 6 + 20 + 3)
+            size.setWidth(self.fontMetrics().horizontalAdvance(self.text()) + self.iconSize().width() + (6 if self.text() else 0) + 20 + 3)
             return size
         if not self.icon().isNull():
             size.setWidth(size.width() + 4)
@@ -79,17 +79,29 @@ class IconTextButton(QPushButton):
         option.icon, option.text = QIcon(), ""
         painter = QStylePainter(self)
         painter.save()
-        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        if self.objectName() == "pageNavigation" and self.isChecked():
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#e7e3f3"))
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 12, 12)
+            option.palette.setColor(QPalette.ColorRole.ButtonText, QColor("#42447a"))
+        else:
+            painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
         painter.restore()
         rect = self.style().subElementRect(QStyle.SubElement.SE_PushButtonContents, option, self)
         icon_size = self.iconSize()
         text_width = option.fontMetrics.horizontalAdvance(text)
-        gap = 6 if self.objectName() == "headerActionButton" else 8
+        gap = (6 if self.objectName() == "headerActionButton" else 8) if text else 0
         width = icon_size.width() + gap + text_width
-        x = rect.left() if self.align_left else rect.center().x() - width // 2
+        if not text:
+            rect = self.rect()
+            x = (self.width() - icon_size.width()) // 2
+        else:
+            x = rect.left() if self.align_left else rect.center().x() - width // 2
         state = QIcon.State.On if self.isChecked() else QIcon.State.Off
-        mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
-        icon.paint(painter, x, rect.center().y() - icon_size.height() // 2,
+        mode = (QIcon.Mode.Active if self.underMouse() or self.isDown() else QIcon.Mode.Normal) if self.isEnabled() else QIcon.Mode.Disabled
+        icon_y = (self.height() - icon_size.height()) // 2 if not text else rect.center().y() - icon_size.height() // 2
+        icon.paint(painter, x, icon_y,
                    icon_size.width(), icon_size.height(), Qt.AlignmentFlag.AlignCenter, mode, state)
         text_rect = QRectF(x + icon_size.width() + gap, rect.top(), text_width, rect.height()).toRect()
         self.style().drawItemText(painter, text_rect,
@@ -97,9 +109,126 @@ class IconTextButton(QPushButton):
                                   option.palette, self.isEnabled(), text, QPalette.ColorRole.ButtonText)
 
 
+class OverviewToggle(QPushButton):
+    """Persistent bottom-right control for the overview sidebar."""
+    REST_WIDTH = 32
+    TAB_HEIGHT = 36
+    HOVER_WIDTH = 44
+
+    def __init__(self, parent, action):
+        super().__init__(parent)
+        self.action = action
+        self.setFixedSize(self.REST_WIDTH, self.TAB_HEIGHT)
+        self.extension = QVariantAnimation(self)
+        self.extension.setDuration(280)
+        self.extension.setEasingCurve(QEasingCurve.Type.OutBack)
+        self.extension.valueChanged.connect(self.animate_width)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName("Toggle Circuit Overview")
+        self.setToolTip("")
+        self.setStyleSheet("QPushButton { background: #fdfefe; border: none; border-top-left-radius: 18px; border-bottom-left-radius: 18px; border-top-right-radius: 0; border-bottom-right-radius: 0; padding: 0; } QPushButton:hover { background: #e7e3f3; }")
+        self.clicked.connect(lambda: action.setChecked(not action.isChecked()))
+        action.toggled.connect(self.reset_extension)
+        parent.installEventFilter(self)
+        workspace = getattr(parent.window(), "workspace", None)
+        if workspace is not None:
+            workspace.installEventFilter(self)
+        dock = getattr(parent.window(), "overview_dock", None)
+        if dock is not None:
+            dock.installEventFilter(self)
+        panel = getattr(parent.window(), "component_details", None)
+        if panel is not None:
+            panel.installEventFilter(self)
+        action.toggled.connect(lambda checked: QTimer.singleShot(0, self.reposition))
+        self.reposition()
+
+    def reposition(self):
+        root = self.parentWidget()
+        workspace = getattr(root.window(), "workspace", root)
+        bottom = workspace.mapTo(root, QPoint(0, workspace.height())).y()
+        self.move(max(0, root.width() - self.width()),
+                  max(0, bottom - self.height() - 24))
+        self.raise_()
+
+    def reset_extension(self, checked):
+        self.extension.stop()
+        self.setFixedWidth(self.REST_WIDTH)
+        self.reposition()
+        self.update()
+
+    def animate_width(self, value):
+        self.setFixedWidth(round(value))
+        self.reposition()
+
+    def animate_to(self, width):
+        self.extension.stop()
+        expanding = width > self.width()
+        self.extension.setEasingCurve(QEasingCurve.Type.OutBack if expanding else QEasingCurve.Type.OutCubic)
+        self.extension.setDuration(280 if expanding else 180)
+        self.extension.setStartValue(float(self.width()))
+        self.extension.setEndValue(float(width))
+        self.extension.start()
+
+    def enterEvent(self, event):
+        if not self.action.isChecked():
+            self.animate_to(self.HOVER_WIDTH)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.extension.stop()
+        self.setFixedWidth(self.REST_WIDTH)
+        self.reposition()
+        super().leaveEvent(event)
+
+    def eventFilter(self, watched, event):
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show, QEvent.Type.Hide, QEvent.Type.LayoutRequest):
+            self.reposition()
+            QTimer.singleShot(0, self.reposition)
+        return False
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#e7e3f3" if self.underMouse() else "#fdfefe"))
+        painter.drawRoundedRect(QRectF(self.rect()), 18, 18)
+        # Fill the attachment side completely, including the last pixel.
+        painter.drawRect(QRectF(self.width() / 2, 0, self.width() / 2, self.height()))
+        painter.setPen(QPen(QColor("#42447a" if self.underMouse() else "#4c5558"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        # Point toward the panel when closed and toward its edge when open.
+        tip = 20 if self.action.isChecked() else 12
+        tail = 12 if self.action.isChecked() else 20
+        painter.drawLine(tail, 12, tip, 18)
+        painter.drawLine(tip, 18, tail, 24)
+
+
+class StatusToggle(OverviewToggle):
+    """Mirror the overview control at the application's left edge."""
+    def reposition(self):
+        root = self.parentWidget()
+        workspace = getattr(root.window(), "workspace", root)
+        bottom = workspace.mapTo(root, QPoint(0, workspace.height())).y()
+        self.move(0, max(0, bottom - self.height() - 24))
+        self.raise_()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#e7e3f3" if self.underMouse() else "#fdfefe"))
+        painter.drawRoundedRect(QRectF(self.rect()), 18, 18)
+        painter.drawRect(QRectF(0, 0, self.width() / 2, self.height()))
+        painter.setPen(QPen(QColor("#42447a" if self.underMouse() else "#4c5558"), 2,
+                            Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        tip = 12 if self.action.isChecked() else 20
+        tail = 20 if self.action.isChecked() else 12
+        painter.drawLine(tail, 12, tip, 18)
+        painter.drawLine(tip, 18, tail, 24)
+
+
 class NoHoverTooltips(QObject):
     def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.ToolTip:
+        if event.type() == QEvent.Type.ToolTip and not watched.property("allowTooltip"):
             return True
         return super().eventFilter(watched, event)
 
@@ -192,13 +321,13 @@ class SchematicView(QGraphicsView):
         self.grid_visible = True
         self.zoom_controls = QFrame(self.viewport())
         self.zoom_controls.setObjectName("zoomToolbar")
-        self.zoom_controls.setStyleSheet("QFrame#zoomToolbar { background: white; border: 1px solid #e1e1e1; border-radius: 10px; } QPushButton { background: transparent; border: none; padding: 0px; color: #222222; font-size: 12px; } QPushButton:hover { background: #eeeeee; border-radius: 6px; } QPushButton:pressed { background: #dddddd; }")
+        self.zoom_controls.setStyleSheet("QFrame#zoomToolbar { background: white; border: none; border-radius: 10px; } QPushButton { background: transparent; border: none; padding: 0px; color: #222222; font-size: 12px; } QPushButton:hover { background: #eeeeee; border-radius: 6px; } QPushButton:pressed { background: #dddddd; }")
         controls = QHBoxLayout(self.zoom_controls)
         controls.setContentsMargins(6, 4, 6, 4)
         controls.setSpacing(3)
         self.display_controls = QFrame(self.viewport())
         self.display_controls.setObjectName("displayControls")
-        self.display_controls.setStyleSheet("QFrame#displayControls { background: white; border: 1px solid #e1e1e1; border-radius: 10px; }")
+        self.display_controls.setStyleSheet("QFrame#displayControls { background: white; border: none; border-radius: 10px; }")
         display_layout = QHBoxLayout(self.display_controls)
         display_layout.setContentsMargins(6, 8, 6, 8)
         display_layout.setSpacing(3)
@@ -209,7 +338,7 @@ class SchematicView(QGraphicsView):
         self.labels_toggle.setStyleSheet("""
             QCheckBox { background: transparent; padding: 0px 6px; font-size: 12px; spacing: 6px; }
             QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #9b9ba6; border-radius: 2px; background: white; }
-            QCheckBox::indicator:checked { background: #e2e2e7; border-color: #787aaf; image: url("CHECKMARK_PATH"); }
+            QCheckBox::indicator:checked { background: #e7e3f3; border-color: #787aaf; image: url("CHECKMARK_PATH"); }
             QCheckBox::indicator:hover { border-color: #42447a; }
         """.replace("CHECKMARK_PATH", checkmark_path))
         self.labels_toggle.toggled.connect(self.set_labels_visible)
@@ -275,7 +404,7 @@ class SchematicView(QGraphicsView):
         self.pan_button.setIconSize(QSize(18, 18))
         self.pan_button.setFixedSize(30, 30)
         self.pan_button.setAccessibleName("Pan schematic with left mouse drag")
-        self.pan_button.setStyleSheet("QPushButton { border: none; border-radius: 6px; padding: 0px; } QPushButton:checked { background: #e2e2e7; color: #42447a; }")
+        self.pan_button.setStyleSheet("QPushButton { border: none; border-radius: 6px; padding: 0px; } QPushButton:checked { background: #e7e3f3; color: #42447a; }")
         self.pan_cursor = QCursor(Qt.CursorShape.OpenHandCursor)
         self.pan_button.toggled.connect(lambda active: self.viewport().setCursor(self.pan_cursor if active else QCursor(Qt.CursorShape.ArrowCursor)))
         controls.addWidget(self.pan_button)
@@ -286,12 +415,12 @@ class SchematicView(QGraphicsView):
         self.display_controls.setFixedWidth(controls_width)
         self.current_reference = QLabel("<b style='color: #42447a;'>Sign Convention</b><br>Voltage&nbsp;&nbsp; V(1) − V(2)<br>Positive current&nbsp;&nbsp; 1 → 2", self.viewport())
         self.current_reference.setWordWrap(True)
-        self.current_reference.setStyleSheet("background: #ffffff; color: #555555; font-size: 12px; padding: 10px 12px; border: 1px solid #dedee5; border-radius: 8px;")
+        self.current_reference.setStyleSheet("background: #ffffff; color: #555555; font-size: 12px; padding: 10px 12px; border: none; border-radius: 8px;")
         self.legend_toggle.toggled.connect(self.current_reference.setVisible)
         self.update_current_reference()
         self.rc_controls = QFrame(self.viewport())
         self.rc_controls.setObjectName("rcTimeToolbar")
-        self.rc_controls.setStyleSheet("QFrame#rcTimeToolbar { background: #ffffff; border: 1px solid #cbd7d4; border-radius: 10px; } QLabel { background: transparent; color: #263c3f; font-size: 12px; } QPushButton { background: #edf4f2; border: 1px solid #cbd7d4; border-radius: 6px; padding: 4px 8px; font-size: 12px; }")
+        self.rc_controls.setStyleSheet("QFrame#rcTimeToolbar { background: #ffffff; border: none; border-radius: 10px; } QLabel { background: transparent; color: #263c3f; font-size: 12px; } QPushButton { background: #edf4f2; border: none; border-radius: 6px; padding: 4px 8px; font-size: 12px; }")
         rc_layout = QVBoxLayout(self.rc_controls)
         rc_layout.setContentsMargins(12, 8, 12, 8)
         rc_layout.setSpacing(6)
@@ -319,7 +448,7 @@ class SchematicView(QGraphicsView):
             overlay.setGraphicsEffect(shadow)
 
     def drawBackground(self, painter, rect):
-        painter.fillRect(rect, QColor("#fafafa"))
+        painter.fillRect(rect, QColor("#ffffff"))
         if not self.grid_visible:
             return
         scale = max(.001, abs(self.transform().m11()))
@@ -484,7 +613,7 @@ class LogoWidget(QWidget):
         self.source = QPixmap(str(path)).toImage()
         if self.source.isNull():
             raise RuntimeError(f"Could not load the logo: {path}")
-        self.setFixedSize(64, 64)
+        self.setFixedSize(52, 52)
         self.cached_image = None
         self.cached_size = None
 
@@ -506,31 +635,10 @@ class LogoWidget(QWidget):
 
 
 class AppHeader(QFrame):
-    """Three-shade turquoise header with a softer, lighter palette."""
+    """Light turquoise header background with individually raised action controls."""
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setClipRect(self.rect())
-        dx, dy = 0.906307, 0.422618
-        extent = self.width() * dx + self.height() * dy
-        cx, cy = self.width() / 2, self.height() / 2
-        gradient = QLinearGradient(cx - dx * extent / 2, cy - dy * extent / 2,
-                                   cx + dx * extent / 2, cy + dy * extent / 2)
-        gradient.setColorAt(0, QColor("#407b80"))
-        gradient.setColorAt(.55, QColor("#609da4"))
-        gradient.setColorAt(1, QColor("#7aabb0"))
-        painter.fillRect(self.rect(), gradient)
-        painter.setPen(Qt.PenStyle.NoPen)
-        for x, y, width, height, rotation, alpha in (
-            (self.width() * .85 - 325, -60, 650, 260, -15, 12),
-            (self.width() - 125, self.height() + 60, 450, 200, -12, 9),
-        ):
-            painter.save()
-            painter.translate(x, y)
-            painter.rotate(rotation)
-            painter.setBrush(QColor(255, 255, 255, alpha))
-            painter.drawEllipse(QRectF(-width / 2, -height / 2, width, height))
-            painter.restore()
+        painter.fillRect(self.rect(), QColor("#fafcfb"))
 
 
 class SettingsButton(QPushButton):
@@ -585,6 +693,10 @@ class CircuitWindow(QMainWindow):
             app.hover_tooltip_filter = NoHoverTooltips(app)
             app.installEventFilter(app.hover_tooltip_filter)
         self.database = database
+        self.draft_circuit_name = None
+        self.saved_record_name = None
+        self.saved_document = None
+        self.blank_original_name = "circuit-name"
         self.topology_valid = False
         self.hardware_topology_revision = None
         self.power_granted = False
@@ -624,16 +736,27 @@ class CircuitWindow(QMainWindow):
 
         header = AppHeader()
         header.setObjectName("header")
-        header.setFixedHeight(88)
+        header.setFixedHeight(96)
+        header_divider = QFrame(header)
+        header_divider.setObjectName("headerEdgeDivider")
+        header_divider.setStyleSheet("QFrame#headerEdgeDivider { background: #d9dddd; border: none; }")
+        header_divider.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        header_divider.hide()
+        header.edge_divider = header_divider
+        edge_shadow = QGraphicsDropShadowEffect(header)
+        edge_shadow.setBlurRadius(12)
+        edge_shadow.setOffset(0, 3)
+        edge_shadow.setColor(QColor(26, 49, 55, 35))
+        header.setGraphicsEffect(edge_shadow)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(24, 12, 24, 12)
+        header_layout.setContentsMargins(24, 20, 16, 12)
         header_layout.setSpacing(12)
         left_header = QWidget()
         left_layout = QHBoxLayout(left_header)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
 
-        logo_path = Path(__file__).resolve().parent / "assets" / "images" / "simple_circuits_logo_2.png"
+        logo_path = Path(__file__).resolve().parent / "assets" / "images" / "simple_circuits_logo.png"
         logo = LogoWidget(logo_path)
         logo.setObjectName("logo")
         logo.setStyleSheet("background: transparent;")
@@ -644,44 +767,50 @@ class CircuitWindow(QMainWindow):
         self.circuit_name = QLineEdit("circuit-name")
         self.circuit_name.setObjectName("circuitName")
         self.circuit_name.setAccessibleName("Circuit name")
-        self.circuit_name.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.circuit_name.setReadOnly(True)
+        self.circuit_name.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.circuit_name.setCursor(Qt.CursorShape.ArrowCursor)
         self.circuit_name.setFixedSize(200, 44)
         self.circuit_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.circuit_name.textChanged.connect(self.resize_circuit_title)
-        self.circuit_name.returnPressed.connect(self.save_circuit_title)
-        self.circuit_name.setToolTip("Edit the circuit name; press Enter to save to Circuit Library")
+        self.circuit_name.setToolTip("Click the pencil to rename; click Save to keep changes")
         pencil_path = Path(__file__).resolve().parent / "assets" / "images" / "pencil.svg"
-        pencil_renderer = QSvgRenderer(pencil_path.read_bytes().replace(b"currentColor", b"#263c3f"))
-        pencil = QPixmap(60, 60)
+        pencil_renderer = QSvgRenderer(pencil_path.read_bytes().replace(b"currentColor", b"#000000"))
+        pencil = QPixmap(72, 72)
         pencil.setDevicePixelRatio(3)
         pencil.fill(Qt.GlobalColor.transparent)
         pencil_painter = QPainter(pencil)
-        pencil_renderer.render(pencil_painter, QRectF(0, 0, 20, 20))
+        pencil_renderer.render(pencil_painter, QRectF(0, 0, 24, 24))
         pencil_painter.end()
         edit_title = self.circuit_name.addAction(QIcon(pencil), QLineEdit.ActionPosition.TrailingPosition)
         for pencil_button in self.circuit_name.findChildren(QToolButton):
             if pencil_button.defaultAction() == edit_title:
-                pencil_button.setIconSize(QSize(20, 20))
-        edit_title.setToolTip("Name and save circuit")
+                pencil_button.setIconSize(QSize(24, 24))
+        edit_title.setToolTip("Rename circuit")
         edit_title.triggered.connect(self.edit_circuit_title)
         left_layout.addWidget(self.circuit_name)
-        self.settings_button = IconTextButton("Settings")
+        self.settings_button = IconTextButton("")
         self.settings_button.setAccessibleName("Settings")
         self.settings_button.setToolTip("Settings")
         self.settings_button.clicked.connect(self.show_settings)
+        # Match visible icon gaps: utility icons have 10px of inset on each side.
+        left_layout.addSpacing(10)
         left_layout.addWidget(self.settings_button)
         left_layout.addStretch()
         right_header = QWidget()
         right_layout = QHBoxLayout(right_header)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(10, 10, 10, 10)
         right_layout.setSpacing(12)
         right_layout.addStretch()
         self.examples_button = self.button("Circuit Library")
         self.examples_button.clicked.connect(self.show_examples)
         self.examples_button.hide()
+        self.new_circuit_button = IconTextButton("New Circuit")
+        self.new_circuit_button.clicked.connect(self.new_circuit)
+        right_layout.addWidget(self.new_circuit_button)
         self.save_button = IconTextButton("Save")
-        self.save_button.clicked.connect(self.edit_circuit_title)
-        self.guide_button = IconTextButton("Guide")
+        self.save_button.clicked.connect(self.save_circuit_title)
+        self.guide_button = IconTextButton("")
         self.guide_button.setAccessibleName("Open Circuit Guide")
         self.guide_button.clicked.connect(self.show_guide)
         left_layout.insertWidget(left_layout.count() - 1, self.guide_button)
@@ -689,33 +818,35 @@ class CircuitWindow(QMainWindow):
         self.export_button = IconTextButton("Export to Falstad")
         self.export_button.clicked.connect(self.open_in_falstad)
         right_layout.addWidget(self.export_button)
-        for button, asset in ((self.settings_button, "settings.svg"),
+        for button, asset in ((self.new_circuit_button, "file-plus.svg"),
+                              (self.settings_button, "settings.svg"),
                               (self.save_button, "save.svg"),
                               (self.guide_button, "circle-help.svg"),
                               (self.export_button, "square-arrow-up-right-exit.svg")):
             button.setObjectName("headerActionButton")
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             path = Path(__file__).resolve().parent / "assets" / "images" / asset
-            renderer = QSvgRenderer(path.read_bytes().replace(b"currentColor", b"#263c3f").replace(b"#222222", b"#263c3f"))
-            icon = QPixmap(60, 60)
+            renderer = QSvgRenderer(path.read_bytes().replace(b"currentColor", b"#000000").replace(b"#222222", b"#000000"))
+            icon = QPixmap(72, 72) if button in (self.settings_button, self.guide_button) else QPixmap(60, 60)
             icon.setDevicePixelRatio(3)
             icon.fill(Qt.GlobalColor.transparent)
             icon_painter = QPainter(icon)
-            renderer.render(icon_painter, QRectF(0, 0, 20, 20))
+            icon_extent = 24 if button in (self.settings_button, self.guide_button) else 20
+            renderer.render(icon_painter, QRectF(0, 0, icon_extent, icon_extent))
             icon_painter.end()
             button.setIcon(QIcon(icon))
-            button.setIconSize(QSize(20, 20))
+            button.setIconSize(QSize(icon_extent, icon_extent))
             button.setFixedHeight(44)
             button.setStyleSheet("""
                 QPushButton#headerActionButton {
-                    background: #f2f9f8; color: #263c3f;
-                    border: 1.5px solid #c9d5d3; border-radius: 12px;
+                    background: #ffffff; color: #000000;
+                    border: none; border-radius: 12px;
                     padding: 10px 10px; font-size: 14px;
                 }
                 QPushButton#headerActionButton::menu-indicator { image: none; width: 0px; }
-                QPushButton#headerActionButton:hover { background: #dcefeb; color: #263c3f; border-color: #bdd6d2; }
-                QPushButton#headerActionButton:pressed { background: #dcefeb; color: #263c3f; border-color: #bdd6d2; }
-                QPushButton#headerActionButton:focus { border: 1.5px solid #c9d5d3; }
+                QPushButton#headerActionButton:hover { background: #f1f1f1; color: #555555; }
+                QPushButton#headerActionButton:pressed { background: #f1f1f1; color: #555555; }
+                QPushButton#headerActionButton:focus { border: none; }
             """)
         header_layout.addWidget(left_header)
         header_layout.addStretch()
@@ -723,8 +854,8 @@ class CircuitWindow(QMainWindow):
         layout.addWidget(header)
 
         body = QHBoxLayout()
-        body.setContentsMargins(16, 16, 16, 16)
-        body.setSpacing(12)
+        body.setContentsMargins(16, 14, 16, 16)
+        body.setSpacing(16)
         layout.addLayout(body, 1)
 
         panel = QFrame()
@@ -737,15 +868,19 @@ class CircuitWindow(QMainWindow):
 
         navigation_frame = QFrame()
         navigation_frame.setObjectName("navigationFrame")
+        navigation_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        navigation_frame.setStyleSheet("QFrame#navigationFrame { background-color: #fafcfb; border: none; border-radius: 14px; }")
         navigation_frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         navigation_shadow = QGraphicsDropShadowEffect(navigation_frame)
-        navigation_shadow.setBlurRadius(14)
+        navigation_shadow.setBlurRadius(18)
         navigation_shadow.setOffset(0, 0)
-        navigation_shadow.setColor(QColor(0, 0, 0, 25))
+        navigation_shadow.setColor(QColor(26, 49, 55, 65))
         navigation_frame.setGraphicsEffect(navigation_shadow)
         navigation_layout = QVBoxLayout(navigation_frame)
         navigation_layout.setContentsMargins(16, 16, 16, 16)
         navigation_layout.setSpacing(2)
+        self.navigation_frame = navigation_frame
+        self.navigation_layout = navigation_layout
         panel_layout.addWidget(navigation_frame)
         self.page_navigation = QButtonGroup(self)
         self.page_navigation.setExclusive(True)
@@ -767,6 +902,7 @@ class CircuitWindow(QMainWindow):
                 button.setIcon(vector_icon)
                 button.setIconSize(QSize(22, 22))
             button.setObjectName("pageNavigation")
+            button.setGraphicsEffect(None)
             button.setCheckable(True)
             button.setChecked(index == 0)
             self.page_navigation.addButton(button, index)
@@ -776,11 +912,7 @@ class CircuitWindow(QMainWindow):
         def sidebar_card(title):
             card = QFrame()
             card.setObjectName("sidebarCard")
-            shadow = QGraphicsDropShadowEffect(card)
-            shadow.setBlurRadius(14)
-            shadow.setOffset(0, 3)
-            shadow.setColor(QColor(0, 0, 0, 24))
-            card.setGraphicsEffect(shadow)
+            add_list_row_shadow(card)
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(12, 12, 12, 12)
             card_layout.setSpacing(10)
@@ -788,7 +920,7 @@ class CircuitWindow(QMainWindow):
             heading.setWordWrap(True)
             heading.setMinimumWidth(0)
             heading.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            heading.setStyleSheet("font-family: 'Ulagadi Sans'; font-size: 14.5px; font-weight: bold; background: transparent;")
+            heading.setStyleSheet("font-family: 'DM Sans'; font-size: 14.5px; font-weight: 600; background: transparent;")
             card_layout.addWidget(heading)
             return card, card_layout
 
@@ -798,7 +930,7 @@ class CircuitWindow(QMainWindow):
         self.circuit_sidebar.setMinimumWidth(0)
         self.circuit_sidebar.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         circuit_sidebar_layout = QVBoxLayout(self.circuit_sidebar)
-        circuit_sidebar_layout.setContentsMargins(6, 4, 6, 10)
+        circuit_sidebar_layout.setContentsMargins(0, 0, 0, 0)
         circuit_sidebar_layout.setSpacing(10)
         connectivity, connection_layout = sidebar_card("Connectivity")
         self.connection_status = QLabel("●  Not connected")
@@ -833,29 +965,31 @@ class CircuitWindow(QMainWindow):
         self.circuit_sidebar_scroll.setStyleSheet("QScrollArea { background: " + PANEL_BACKGROUND + "; border: none; } QScrollArea > QWidget { background: " + PANEL_BACKGROUND + "; } QScrollBar:vertical { width: 6px; }")
         self.connection_section_frame = QFrame()
         self.connection_section_frame.setObjectName("connectionSectionFrame")
-        self.connection_section_frame.setStyleSheet("QFrame#connectionSectionFrame { background: " + PANEL_BACKGROUND + "; border: 1.2px solid #cccccc; border-radius: 14px; }")
+        self.connection_section_frame.setStyleSheet("QFrame#connectionSectionFrame { background: " + PANEL_BACKGROUND + "; border: none; border-radius: 14px; }")
         outer_shadow = QGraphicsDropShadowEffect(self.connection_section_frame)
-        outer_shadow.setBlurRadius(14)
+        outer_shadow.setBlurRadius(18)
         outer_shadow.setOffset(0, 0)
-        outer_shadow.setColor(QColor(0, 0, 0, 28))
+        outer_shadow.setColor(QColor(26, 49, 55, 65))
         self.connection_section_frame.setGraphicsEffect(outer_shadow)
         section_layout = QVBoxLayout(self.connection_section_frame)
-        section_layout.setContentsMargins(8, 8, 8, 8)
+        section_layout.setContentsMargins(16, 16, 16, 16)
         section_layout.setSpacing(12)
         information_header = QWidget()
         information_header.setStyleSheet("background: transparent;")
         information_layout = QVBoxLayout(information_header)
-        information_layout.setContentsMargins(8, 8, 8, 0)
+        information_layout.setContentsMargins(0, 0, 0, 0)
         information_layout.setSpacing(12)
         information_title = QLabel("Circuit Status")
-        information_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #222222; background: transparent;")
+        information_title.setStyleSheet("font-family: 'Space Grotesk'; font-size: 16px; font-weight: 600; color: #222222; background: transparent;")
         information_title_row = QHBoxLayout()
+        information_title.setMinimumHeight(24)
+        information_title_row.setContentsMargins(0, 0, 0, 0)
         information_title_row.addWidget(information_title, 1)
         self.status_close_button = QPushButton("×")
         self.status_close_button.setFixedSize(24, 24)
         self.status_close_button.setAccessibleName("Hide Circuit Status")
         self.status_close_button.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0px; border-radius: 6px; } QPushButton:hover { background: #f7f9f9; }")
-        information_title_row.addWidget(self.status_close_button)
+        self.status_close_button.hide()
         information_layout.addLayout(information_title_row)
         information_divider = QFrame()
         information_divider.setFixedHeight(1)
@@ -908,15 +1042,15 @@ class CircuitWindow(QMainWindow):
         self.circuit = None
         self.simulation_result = None
         schematic_area = QVBoxLayout()
-        schematic_area.setContentsMargins(0, 0, 0, 0)
+        schematic_area.setContentsMargins(10, 10, 10, 10)
         schematic_area.setSpacing(8)
         self.safety_status_text = "Waiting for a circuit"
         self.schematic_frame = QFrame()
         self.schematic_frame.setObjectName("schematicFrame")
         outer_shadow = QGraphicsDropShadowEffect(self.schematic_frame)
-        outer_shadow.setBlurRadius(14)
+        outer_shadow.setBlurRadius(18)
         outer_shadow.setOffset(0, 0)
-        outer_shadow.setColor(QColor(0, 0, 0, 28))
+        outer_shadow.setColor(QColor(26, 49, 55, 65))
         self.schematic_frame.setGraphicsEffect(outer_shadow)
         frame_layout = QVBoxLayout(self.schematic_frame)
         frame_layout.setContentsMargins(16, 16, 16, 16)
@@ -930,14 +1064,9 @@ class CircuitWindow(QMainWindow):
         circuit_page.setLayout(schematic_area)
         self.content_pages = QStackedWidget()
         self.content_pages.addWidget(circuit_page)
-        my_circuits_page = QWidget()
-        my_layout = QVBoxLayout(my_circuits_page)
-        my_layout.addStretch()
-        title = QLabel("My Circuits")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        my_layout.addWidget(title)
-        my_layout.addStretch()
-        self.content_pages.addWidget(my_circuits_page)
+        self.my_circuits_page = CircuitLibraryPage(title="My Circuits", empty_message="No saved circuits yet. Use Save to keep your current circuit here.")
+        self.my_circuits_page.circuit_requested.connect(self.open_saved_circuit)
+        self.content_pages.addWidget(self.my_circuits_page)
         self.library_page = CircuitLibraryPage()
         self.library_page.circuit_requested.connect(self.open_library_circuit)
         self.content_pages.addWidget(self.library_page)
@@ -958,27 +1087,37 @@ class CircuitWindow(QMainWindow):
         self.workspace = QMainWindow()
         self.workspace.setDockNestingEnabled(True)
         self.workspace.setCentralWidget(self.content_pages)
-        self.workspace.setStyleSheet("QMainWindow::separator { width: 12px; height: 12px; background: transparent; } QDockWidget { font-size: 14px; font-weight: bold; } QDockWidget::title { background: #edf4f2; padding: 8px; }")
+        self.workspace.setStyleSheet("QMainWindow::separator { width: 4px; height: 4px; background: transparent; } QDockWidget { font-size: 14px; font-weight: bold; } QDockWidget::title { background: #edf4f2; padding: 8px; }")
         self.navigation_dock = QDockWidget("Navigation", self.workspace)
         self.navigation_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         navigation_title = QWidget()
         navigation_title.setFixedHeight(0)
         self.navigation_dock.setTitleBarWidget(navigation_title)
         navigation_container = QWidget()
-        navigation_container.setStyleSheet("background: transparent;")
+        navigation_container.setObjectName("navigationShadowWrapper")
+        navigation_container.setStyleSheet("QWidget#navigationShadowWrapper { background: transparent; }")
         navigation_container_layout = QVBoxLayout(navigation_container)
-        navigation_container_layout.setContentsMargins(0, 0, 0, 0)
+        navigation_container_layout.setContentsMargins(10, 10, 10, 10)
         navigation_container_layout.addWidget(navigation_frame)
         self.navigation_dock.setWidget(navigation_container)
         self.navigation_dock.setMaximumWidth(280)
         self.workspace.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.navigation_dock)
         self.status_dock = QDockWidget("Circuit Status", self.workspace)
         self.status_dock.setObjectName("circuitStatusDock")
-        self.status_dock.setWidget(self.connection_section_frame)
+        def shadow_wrapper(panel, name):
+            wrapper = QWidget()
+            wrapper.setObjectName(name)
+            wrapper.setStyleSheet(f"QWidget#{name} {{ background: transparent; }}")
+            wrapper_layout = QVBoxLayout(wrapper)
+            wrapper_layout.setContentsMargins(10, 10, 10, 10)
+            wrapper_layout.setSpacing(0)
+            wrapper_layout.addWidget(panel)
+            return wrapper
+        self.status_dock.setWidget(shadow_wrapper(self.connection_section_frame, "statusShadowWrapper"))
         information_header.show()
         self.overview_dock = QDockWidget("Circuit Overview", self.workspace)
         self.overview_dock.setObjectName("circuitOverviewDock")
-        self.overview_dock.setWidget(self.component_details)
+        self.overview_dock.setWidget(shadow_wrapper(self.component_details, "overviewShadowWrapper"))
         for dock in (self.status_dock, self.overview_dock):
             dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
             dock.setMinimumWidth(0)
@@ -994,17 +1133,18 @@ class CircuitWindow(QMainWindow):
         self.workspace.resizeDocks([self.navigation_dock, self.status_dock], [200, 600], Qt.Orientation.Vertical)
         body.addWidget(self.workspace, 1)
         self.panel_visibility = [True, True]
-        self.views_button = IconTextButton("Views")
+        self.views_button = IconTextButton("")
+        self.views_button.setAccessibleName("Views")
         views_path = Path(__file__).resolve().parent / "assets" / "images" / "columns-2.svg"
-        views_renderer = QSvgRenderer(views_path.read_bytes().replace(b"currentColor", b"#263c3f"))
-        views_icon = QPixmap(60, 60)
+        views_renderer = QSvgRenderer(views_path.read_bytes().replace(b"currentColor", b"#000000"))
+        views_icon = QPixmap(72, 72)
         views_icon.setDevicePixelRatio(3)
         views_icon.fill(Qt.GlobalColor.transparent)
         views_painter = QPainter(views_icon)
-        views_renderer.render(views_painter, QRectF(0, 0, 20, 20))
+        views_renderer.render(views_painter, QRectF(0, 0, 24, 24))
         views_painter.end()
         self.views_button.setIcon(QIcon(views_icon))
-        self.views_button.setIconSize(QSize(20, 20))
+        self.views_button.setIconSize(QSize(24, 24))
         self.views_button.setObjectName("headerActionButton")
         self.views_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.views_button.setFixedHeight(44)
@@ -1019,27 +1159,71 @@ class CircuitWindow(QMainWindow):
             self.view_actions.append(action)
         self.status_close_button.clicked.connect(lambda: self.view_actions[0].setChecked(False))
         self.component_details.panel_close_requested.connect(lambda: self.view_actions[1].setChecked(False))
+        for icon_button in (self.settings_button, self.guide_button, self.views_button):
+            icon_button.setFixedSize(44, 44)
+        for icon_button in (self.settings_button, self.guide_button, self.views_button):
+            icon_button.setStyleSheet("QPushButton#headerActionButton { background: transparent; color: black; border: none; padding: 10px; } QPushButton#headerActionButton:hover, QPushButton#headerActionButton:pressed { background: transparent; color: #555555; }")
+        for action_button in (self.new_circuit_button, self.save_button, self.export_button):
+            action_button.setStyleSheet(action_button.styleSheet() + "QPushButton#headerActionButton, QPushButton#headerActionButton:focus { border: none; }")
+        for raised_control in (self.circuit_name, self.new_circuit_button,
+                               self.save_button, self.export_button):
+            header_shadow = QGraphicsDropShadowEffect(raised_control)
+            header_shadow.setBlurRadius(18)
+            header_shadow.setOffset(0, 0)
+            header_shadow.setColor(QColor(26, 49, 55, 65))
+            raised_control.setGraphicsEffect(header_shadow)
+        for utility, asset in ((self.settings_button, "settings.svg"),
+                               (self.guide_button, "circle-help.svg"),
+                               (self.views_button, "columns-2.svg")):
+            utility_icon = QIcon()
+            svg = (Path(__file__).resolve().parent / "assets" / "images" / asset).read_bytes()
+            for mode, colour in ((QIcon.Mode.Normal, b"#000000"), (QIcon.Mode.Active, b"#555555")):
+                renderer = QSvgRenderer(svg.replace(b"currentColor", colour).replace(b"#222222", colour))
+                pixmap = QPixmap(72, 72)
+                pixmap.setDevicePixelRatio(3)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                renderer.render(painter, QRectF(0, 0, 24, 24))
+                painter.end()
+                utility_icon.addPixmap(pixmap, mode)
+            utility.setIcon(utility_icon)
+        self.views_button.setStyleSheet(self.views_button.styleSheet() + "QPushButton#headerActionButton::menu-indicator { image: none; width: 0px; height: 0px; }")
+        self.views_button.setStyleSheet(self.views_button.styleSheet() + 'QPushButton#headerActionButton[menuOpen="true"] { background: #e7e3f3; border: none; border-radius: 12px; }')
+        def mark_views_open(opened):
+            self.views_button.setProperty("menuOpen", opened)
+            self.views_button.style().unpolish(self.views_button)
+            self.views_button.style().polish(self.views_button)
+            self.views_button.update()
+        self.views_menu.aboutToShow.connect(lambda: mark_views_open(True))
+        self.views_menu.aboutToHide.connect(lambda: mark_views_open(False))
+        self.views_button.setStyleSheet(self.views_button.styleSheet() + 'QPushButton#headerActionButton { padding: 0px; } QPushButton#headerActionButton:hover { background: #f1f1f1; border-radius: 12px; } QPushButton#headerActionButton[menuOpen="true"], QPushButton#headerActionButton[menuOpen="true"]:hover { background: #e7e3f3; border-radius: 12px; }')
+        for utility_button in (self.settings_button, self.guide_button):
+            utility_button.setStyleSheet(utility_button.styleSheet() + 'QPushButton#headerActionButton { padding: 0px; } QPushButton#headerActionButton:hover { background: #f1f1f1; border-radius: 12px; } QPushButton#headerActionButton[activeDialog="true"], QPushButton#headerActionButton[activeDialog="true"]:hover { background: #e7e3f3; border-radius: 12px; }')
         self.views_button.setMenu(self.views_menu)
         left_layout.insertWidget(left_layout.count() - 1, self.views_button)
+        self.overview_toggle = OverviewToggle(self.centralWidget(), self.view_actions[1])
+        self.status_toggle = StatusToggle(self.centralWidget(), self.view_actions[0])
+        self.status_toggle.setAccessibleName("Toggle Circuit Status and navigation labels")
 
         self.setStyleSheet("""
-            QFrame#schematicFrame { background: #fafafa; border: 1.2px solid #cccccc; border-radius: 14px; }
+            QFrame#schematicFrame { background: #ffffff; border: none; border-radius: 14px; }
 
-            QFrame#navigationFrame { background: #f5f3f8; border: 1.2px solid #cccccc; border-radius: 14px; }
-            QFrame#connectionSectionFrame { background: #f7f7f9; border: 1.2px solid #cccccc; border-radius: 14px; }
+            QFrame#navigationFrame { background: #fafcfb; border: none; border-radius: 14px; }
+            QFrame#connectionSectionFrame { background: #fdfefe; border: none; border-radius: 14px; }
             QFrame#controlPanel { background: transparent; border: none; }
             QFrame#controlPanel, QFrame#controlPanel QWidget {
-                font-family: "Ulagadi Sans"; font-size: 14px;
+                font-family: "DM Sans"; font-size: 14px;
             }
             QFrame#controlPanel QHeaderView::section { font-weight: 500; }
             QFrame#controlPanel QPushButton#componentDisclosure:checked { font-weight: 500; }
-            QFrame#sidebarCard { background: #ffffff; border: 1px solid #dedede; border-radius: 12px; }
-            QPushButton#pageNavigation { text-align: left; padding: 12px; border: none; border-left: 3px solid transparent; border-radius: 9px; background: transparent; }
+            QFrame#sidebarCard { background: #e2ebe9; border: none; border-radius: 12px; }
+            QPushButton#pageNavigation { font-family: "Space Grotesk"; font-weight: 500; text-align: left; padding: 12px; border: none; border-radius: 9px; background: transparent; }
             QPushButton#pageNavigation:hover { background: #f1f1f1; }
-            QPushButton#pageNavigation:checked { background: #ffffff; color: #42447a; border-left: 3px solid #42447a; font-weight: 500; }
+            QPushButton#pageNavigation:checked, QPushButton#pageNavigation:checked:hover { background: #e7e3f3; color: #42447a; border: none; border-radius: 12px; font-weight: 500; }
 
             QWidget {
-                background: #fafafa;
+                font-family: "DM Sans";
+                background: #e3e9eb;
                 color: #111111;
                 font-size: 14px;
                 font-weight: normal;
@@ -1047,6 +1231,7 @@ class CircuitWindow(QMainWindow):
             QFrame#header { background: transparent; border: none; }
 
             QLabel { background: transparent; }
+            QPushButton, QToolButton, QCheckBox, QComboBox { font-family: "DM Sans"; font-weight: 500; }
             QToolTip {
                 background-color: #ffffff;
                 color: #222222;
@@ -1145,12 +1330,12 @@ class CircuitWindow(QMainWindow):
             }
             QHeaderView::section:last { border-right: none; }
             QLineEdit#circuitName {
-                background: #ffffff;
-                color: #263c3f;
-                border: 1px solid #c9d5d3;
+                font-family: "Space Grotesk";                background: #ffffff;
+                color: #000000;
+                border: none;
                 border-radius: 12px;
                 font-size: 16px;
-                font-weight: 500;
+                font-weight: 600;
                 padding: 0 10px;
             }
             QPushButton {
@@ -1186,7 +1371,7 @@ class CircuitWindow(QMainWindow):
             button.setFixedHeight(button.sizeHint().height())
         navigation_height = sum(button.height() for button in self.navigation_buttons) + 32 + 2 * navigation_layout.spacing()
         navigation_frame.setFixedHeight(navigation_height)
-        self.navigation_dock.setFixedHeight(navigation_height)
+        self.navigation_dock.setFixedHeight(navigation_height + 20)
         # Both sidebar columns stop at the same minimum width.
         sidebar_minimum = max(self.navigation_dock.minimumSizeHint().width(),
                               self.status_dock.minimumSizeHint().width())
@@ -1199,28 +1384,135 @@ class CircuitWindow(QMainWindow):
         width = self.circuit_name.fontMetrics().horizontalAdvance(text) + 64
         self.circuit_name.setFixedWidth(max(200, width))
 
-    def edit_circuit_title(self):
-        if self.circuit is None:
-            self.statusBar().showMessage("Open a circuit before naming and saving it.", 5000)
+    def workspace_document(self):
+        data = copy.deepcopy(getattr(self, "circuit_document", None))
+        if data is None:
+            data = {"schema_version": 1, "name": self.draft_circuit_name or "Untitled", "ground_node": None, "components": [], "nets": []}
+        data["name"] = self.circuit_name.text().strip()
+        return data
+
+    def has_unsaved_circuit(self):
+        current = self.workspace_document()
+        if self.saved_document is not None:
+            return current != self.saved_document
+        if self.circuit is not None:
+            return True
+        return self.blank_original_name is not None and current["name"] != self.blank_original_name
+
+    def remember_saved_workspace(self, data):
+        self.saved_record_name = None
+        self.saved_document = None
+        if self.database is not None:
+            try:
+                if data["name"] in self.database.list_names(origin="user") and self.database.load(data["name"]) == data:
+                    self.saved_record_name = data["name"]
+                    self.saved_document = copy.deepcopy(data)
+            except (KeyError, OSError, sqlite3.Error, ValueError):
+                pass
+
+    def new_circuit(self):
+        existing = getattr(self, "name_dialog", None)
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
             return
+        if self.has_unsaved_circuit():
+            choice = QMessageBox.question(
+                self, "Unsaved circuit", "Save the current circuit before starting a new one?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if choice == QMessageBox.StandardButton.Cancel:
+                return
+            if choice == QMessageBox.StandardButton.Save:
+                if not self.save_circuit_title():
+                    return
+        self.create_blank_circuit()
+
+    def create_blank_circuit(self, name=None, document=None):
+        """Start an empty workspace without modifying saved records or firmware."""
+        if name is None:
+            if self.database is None:
+                self.database = CircuitDatabase()
+            names = set(self.database.list_names(origin="user"))
+            untitled_names = {name for name in names
+                              if name.startswith("Untitled ") and name[9:].isdigit()}
+            number = len(untitled_names) + 1
+            while f"Untitled {number}" in names:
+                number += 1
+            name = f"Untitled {number}"
+        self.circuit = None
+        self.circuit_document = copy.deepcopy(document) if document is not None else {
+            "schema_version": 1, "name": name, "ground_node": None, "components": [], "nets": []}
+        self.saved_record_name = None
+        self.saved_document = None
+        self.blank_original_name = name
+        self.simulation_result = SimulationResult("empty", "Waiting for circuit topology")
+        self.topology_valid = False
+        self.hardware_topology_revision = None
+        self.power_granted = False
+        self.request_issues = ()
+        self.selected_safety_issue = None
+        self.focused_short_issue = None
+        self.rc_preview_result = None
+        self.rc_preview_position = None
+        self.rc_preview_timing = None
+        self.rc_endpoints = None
+        self.rlc_model = None
+        self.canvas.rc_controls.hide()
+        self.safety_report = SafetyReport((SafetyIssue("no_circuit", "Waiting for circuit topology."),))
+        self.power_protection.update_report(self.safety_report, topology_changed=True)
+        self.component_details.overview_circuit = None
+        self.component_details.rc_preview_position = None
+        self.component_legend.setRowCount(0)
+        self.component_details.clear_selection()
+        self.scene.clear()
+        self.canvas.resetTransform()
+        self.scene.setSceneRect(QRectF(-200, -150, 400, 300))
+        message = self.scene.addText("Waiting for circuit topology", QApplication.font())
+        message.setDefaultTextColor(QColor("#687b77"))
+        message.setPos(-message.boundingRect().width()/2, -message.boundingRect().height()/2)
+        message.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.canvas.centerOn(0, 0)
+        self.canvas.update_zoom_percentage()
+        self.canvas.position_rc_controls()
+        self.draft_circuit_name = name
+        self.circuit_name.setText(self.draft_circuit_name)
+        self.circuit_name.setToolTip("Rename this workspace; click Save to keep changes")
+        self.circuit_name.setModified(False)
+        self.last_uploaded_label.setText("Last uploaded: —")
+        self.last_synced_label.setText("Last synced: —")
+        self.refresh_safety_status(redraw=False)
+        self.navigation_buttons[0].setChecked(True)
+        self.change_workspace_page(0)
+        self.view_actions[1].setChecked(False)
+        self.toggle_workspace_panel(1, False)
+        self.save_button.setEnabled(True)
+        self.export_button.setEnabled(False)
+        self.statusBar().clearMessage()
+
+    def edit_circuit_title(self):
         existing = getattr(self, "name_dialog", None)
         if existing is not None:
             existing.raise_()
             existing.activateWindow()
             return
         dialog = QDialog(self)
-        dialog.setWindowTitle("Name circuit")
-        dialog.resize(420, 180)
+        dialog.setWindowTitle("Rename circuit")
+        dialog.setObjectName("renameCircuitDialog")
+        dialog.setStyleSheet("QDialog#renameCircuitDialog QPushButton { padding: 8px 16px; min-height: 20px; border: none; border-radius: 8px; background: #e7e3f3; color: #222222; } QDialog#renameCircuitDialog QPushButton:hover { background: #dcd5ed; }")
+        dialog.setMinimumWidth(420)
+        dialog.resize(420, 240)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
         layout.addWidget(QLabel("Circuit name"))
         name_field = QLineEdit(self.circuit_name.text())
         name_field.setObjectName("savedCircuitName")
-        name_field.setAccessibleName("Circuit name to save")
-        name_field.setStyleSheet("background: white; border: 1px solid #cfcfd8; border-radius: 8px; padding: 10px;")
+        name_field.setAccessibleName("Circuit name")
+        name_field.setStyleSheet("background: white; border: none; border-radius: 8px; padding: 10px;")
         layout.addWidget(name_field)
-        hint = QLabel("Save this circuit to Circuit Library on this computer. The original example file stays unchanged.")
+        hint = QLabel("Renaming changes this workspace only. Click Save in the header to keep the changes.")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         error = QLabel()
@@ -1230,11 +1522,16 @@ class CircuitWindow(QMainWindow):
         error.hide()
         layout.addWidget(error)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("Rename")
+        for button in buttons.buttons():
+            button.ensurePolished()
+            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text().replace("&", "")) + 40)
+            button.setMinimumHeight(button.fontMetrics().height() + 20)
         layout.addWidget(buttons)
         def save_name():
             old_text = self.circuit_name.text()
             self.circuit_name.setText(name_field.text())
-            if self.save_circuit_title():
+            if self.rename_circuit_title():
                 dialog.accept()
             else:
                 error.setText(self.circuit_name.toolTip())
@@ -1253,36 +1550,44 @@ class CircuitWindow(QMainWindow):
         name_field.setFocus()
         name_field.selectAll()
 
-    def save_circuit_title(self):
-        if self.circuit is None:
-            return False
+    def rename_circuit_title(self):
         name = self.circuit_name.text().strip()
         if not name:
-            self.circuit_name.setText(self.circuit.name)
+            self.circuit_name.setText(self.circuit.name if self.circuit is not None else self.draft_circuit_name or "Untitled")
             self.circuit_name.setToolTip("Circuit name cannot be empty")
             return False
-        data = copy.deepcopy(getattr(self, "circuit_document", None))
-        if data is None:
-            data = asdict(self.circuit)
-            data["schema_version"] = 1
-        data["name"] = name
+        self.draft_circuit_name = name
+        if self.circuit is not None:
+            self.circuit = replace(self.circuit, name=name)
+        if self.circuit_document is not None:
+            self.circuit_document = dict(self.circuit_document, name=name)
+        self.circuit_name.setText(name)
+        self.circuit_name.setModified(False)
+        self.circuit_name.setToolTip("Renamed in this workspace; click Save to keep changes")
+        self.circuit_name.clearFocus()
+        return True
+
+    def save_circuit_title(self):
+        data = self.workspace_document()
+        if not data["name"]:
+            self.rename_circuit_title()
+            return False
         try:
             if self.database is None:
                 self.database = CircuitDatabase()
-            if name != self.circuit.name and name in self.database.list_names():
-                self.circuit_name.setToolTip("That name already exists. Choose another name to preserve the saved circuit.")
-                return False
-            self.database.save(data)
+            self.database.save_workspace(data, previous_name=self.saved_record_name)
         except (OSError, sqlite3.Error, ValueError) as error:
-            self.circuit_name.setToolTip(f"Could not save circuit: {error}")
+            message = f"Could not save circuit: {error}"
+            self.circuit_name.setToolTip(message)
+            self.statusBar().showMessage(message, 6000)
             return False
-        self.circuit = replace(self.circuit, name=name)
-        self.circuit_document = data
-        self.circuit_name.setText(name)
-        self.circuit_name.setModified(False)
-        self.circuit_name.setToolTip("Saved to Circuit Library · Edit and press Enter to save again")
-        self.circuit_name.clearFocus()
-        self.statusBar().showMessage(f'Saved “{name}” to Circuit Library.', 6000)
+        self.rename_circuit_title()
+        self.circuit_document = copy.deepcopy(data)
+        self.saved_record_name = data["name"]
+        self.saved_document = copy.deepcopy(data)
+        self.refresh_my_circuits()
+        self.circuit_name.setToolTip("Saved; rename changes take effect in the database only when Save is clicked")
+        self.statusBar().showMessage(f'Saved “{data["name"]}”.', 6000)
         return True
 
     def load_topology(self, data, hardware_revision=None):
@@ -1296,7 +1601,14 @@ class CircuitWindow(QMainWindow):
             self.power_protection.update_report(self.safety_report)
             self.refresh_safety_status()
             return False
-        self.circuit_document = copy.deepcopy(json.loads(data) if isinstance(data, (str, bytes)) else data)
+        document = copy.deepcopy(json.loads(data) if isinstance(data, (str, bytes)) else data)
+        if not circuit.components and not circuit.nets:
+            self.create_blank_circuit(name=circuit.name, document=document)
+            self.remember_saved_workspace(document)
+            return True
+        self.circuit_document = document
+        self.blank_original_name = None
+        self.remember_saved_workspace(document)
         return self.display_circuit(circuit, hardware_revision=hardware_revision)
 
     def display_circuit(self, circuit, preserve_view=False, measurement_update=False, hardware_revision=None):
@@ -1326,6 +1638,8 @@ class CircuitWindow(QMainWindow):
         self.statusBar().clearMessage()
         self.statusBar().setToolTip("V = V1 − V2. Current displays magnitude; arrows indicate conventional current direction.")
         self.circuit = circuit
+        self.save_button.setEnabled(True)
+        self.export_button.setEnabled(self.content_pages.currentIndex() == 0)
         names = COMPONENT_NAMES
         types = {}
         for component in circuit.components:
@@ -1607,12 +1921,46 @@ class CircuitWindow(QMainWindow):
         self.component_details.set_content(component, result)
         self.highlight_details_component(cid)
 
+    def set_navigation_compact(self, compact):
+        if not hasattr(self, "navigation_frame"):
+            return
+        for button in self.navigation_buttons:
+            if not hasattr(button, "navigation_label"):
+                button.navigation_label = button.text()
+            button.setText("" if compact else button.navigation_label)
+            button.setAccessibleName(button.navigation_label)
+            button.align_left = not compact
+            button.setFixedHeight(44 if compact else button.sizeHint().height())
+        margin = 10 if compact else 16
+        self.navigation_layout.setContentsMargins(margin, margin, margin, margin)
+        height = sum(button.height() for button in self.navigation_buttons) + 2 * margin + 2 * self.navigation_layout.spacing()
+        self.navigation_frame.setFixedHeight(height)
+        self.navigation_dock.setFixedHeight(height + 20)
+        if compact:
+            self.navigation_dock.setMinimumWidth(64)
+            self.navigation_dock.setMaximumWidth(84)
+            self.workspace.resizeDocks([self.navigation_dock], [84], Qt.Orientation.Horizontal)
+        else:
+            self.navigation_dock.setMaximumWidth(280)
+            self.navigation_dock.setMinimumWidth(self.status_dock.minimumWidth())
+            self.workspace.resizeDocks([self.navigation_dock], [280], Qt.Orientation.Horizontal)
+
     def toggle_workspace_panel(self, index, visible):
         self.panel_visibility[index] = visible
+        if index == 0:
+            self.set_navigation_compact(not visible)
         dock = (self.status_dock, self.overview_dock)[index]
         dock.setVisible(visible and self.content_pages.currentIndex() == 0)
+        if hasattr(self, "overview_toggle"):
+            self.overview_toggle.reposition()
 
     def set_workspace_panels(self, visible):
+        if hasattr(self, "overview_toggle"):
+            self.overview_toggle.setVisible(visible)
+            self.overview_toggle.reposition()
+        if hasattr(self, "status_toggle"):
+            self.status_toggle.setVisible(visible)
+            self.status_toggle.reposition()
         docks = (self.status_dock, self.overview_dock)
         for dock, wanted in zip(docks, self.panel_visibility):
             dock.setVisible(visible and wanted)
@@ -1620,8 +1968,10 @@ class CircuitWindow(QMainWindow):
     def change_workspace_page(self, index):
         self.set_workspace_panels(index == 0)
         self.content_pages.setCurrentIndex(index)
-        self.export_button.setEnabled(index == 0)
-        if index == 2:
+        self.export_button.setEnabled(index == 0 and self.circuit is not None)
+        if index == 1:
+            self.show_my_circuits()
+        elif index == 2:
             self.show_examples()
 
     def resize_component_legend(self):
@@ -1797,6 +2147,12 @@ class CircuitWindow(QMainWindow):
         self.power_protection.disconnect()
         super().closeEvent(event)
 
+    def mark_utility_active(self, button, active):
+        button.setProperty("activeDialog", active)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
+
     def show_guide(self):
         existing = getattr(self, "guide_dialog", None)
         if existing is not None:
@@ -1806,7 +2162,9 @@ class CircuitWindow(QMainWindow):
             return
         dialog = CircuitGuideDialog(self)
         self.guide_dialog = dialog
+        self.mark_utility_active(self.guide_button, True)
         def closed(result):
+            self.mark_utility_active(self.guide_button, False)
             self.guide_dialog = None
             dialog.deleteLater()
         dialog.finished.connect(closed)
@@ -1819,14 +2177,15 @@ class CircuitWindow(QMainWindow):
         dialog.setObjectName("settingsDialog")
         dialog.setStyleSheet("""
             QDialog#settingsDialog { background: #edf4f2; }
-            QFrame#settingsSection { background: #ffffff; border: 1px solid #d6dfdd; border-radius: 12px; }
+            QFrame#settingsSection { background: #ffffff; border: none; border-radius: 12px; }
             QLabel { background: transparent; }
-            QLabel#settingsHeading { font-size: 14px; font-weight: 500; color: #42447a; }
+            QPushButton, QToolButton, QCheckBox, QComboBox { font-family: "DM Sans"; font-weight: 500; }
+            QLabel#settingsHeading { font-family: "DM Sans"; font-size: 14px; font-weight: 600; color: #42447a; }
             QComboBox { background: #f7faf9; border: 1px solid #cbd7d4; border-radius: 8px; padding: 8px 28px 8px 12px; }
             QComboBox::drop-down { background: transparent; border: none; width: 24px; border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
             QComboBox QAbstractItemView { background: #edf4f2; border: 1px solid #cbd7d4; border-radius: 8px; padding: 6px; outline: none; selection-background-color: #fafffe; selection-color: #222222; }
             QComboBox QAbstractItemView::item { padding: 8px; border-radius: 6px; }
-            QPushButton { background: #ffffff; border: 1px solid #cbd7d4; border-radius: 8px; padding: 8px 14px; }
+            QPushButton { background: #ffffff; border: none; border-radius: 8px; padding: 8px 14px; }
             QPushButton:hover { background: #dcefeb; }
         """)
         layout = QVBoxLayout(dialog)
@@ -1858,7 +2217,7 @@ class CircuitWindow(QMainWindow):
             color = QColor(draft[role])
             foreground = "#111111" if color.lightness() > 140 else "#ffffff"
             button.setText(color.name())
-            button.setStyleSheet(f"background: {color.name()}; color: {foreground}; border: 1px solid #cbd7d4; border-radius: 8px; padding: 8px 16px;")
+            button.setStyleSheet(f"background: {color.name()}; color: {foreground}; border: none; border-radius: 8px; padding: 8px 16px;")
 
         def choose(role):
             color = QColorDialog.getColor(QColor(draft[role]), dialog, "Choose highlight colour")
@@ -1917,6 +2276,8 @@ class CircuitWindow(QMainWindow):
         buttons.rejected.connect(dialog.reject)
         footer.addWidget(buttons)
         layout.addLayout(footer)
+        self.mark_utility_active(self.settings_button, True)
+        dialog.finished.connect(lambda result: self.mark_utility_active(self.settings_button, False))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.canvas.grid_visible = grid_toggle.isChecked()
             self.preferences.setValue("display/grid", self.canvas.grid_visible)
@@ -1966,41 +2327,15 @@ class CircuitWindow(QMainWindow):
         if not QDesktopServices.openUrl(QUrl(url)):
             self.statusBar().showMessage("Could not open the browser. Use falstad.py --output to save circuit text.")
 
+    def bundled_circuits(self):
+        return [json.loads(path.read_bytes()) for path in sorted(
+            (Path(__file__).resolve().parent / "examples").rglob("*.json"))]
+
     def show_examples(self):
-        """Open the library page and refresh its SQLite-backed circuit cards."""
+        """Read-only bundled examples; browsing never seeds or writes user storage."""
         try:
-            if self.database is None:
-                self.database = CircuitDatabase()
-            self.database.upgrade_stock_photoresistor(Path(__file__).resolve().parent / "examples")
-            names = self.database.list_names()
-            if not names:
-                self.database.import_folder(Path(__file__).resolve().parent / "examples")
-                names = self.database.list_names()
-            self.database.upgrade_stock_sources(Path(__file__).resolve().parent / "examples")
-            # Add diagnostic examples to existing libraries without overwriting records.
-            examples_folder = Path(__file__).resolve().parent / "examples"
-            for path in sorted(examples_folder.rglob("*.json")):
-                data = json.loads(path.read_bytes())
-                if data["name"] not in names:
-                    self.database.save(data)
-                    names.append(data["name"])
-        except (OSError, sqlite3.Error, ValueError) as error:
-            QMessageBox.warning(self, "Cannot open circuit library", str(error))
-            return
-
-        # Use bundled file order for known examples; other database records follow.
-        example_order = {}
-        for path in sorted((Path(__file__).resolve().parent / "examples").rglob("*.json")):
-            try:
-                name = json.loads(path.read_bytes())["name"]
-            except (OSError, ValueError, KeyError, TypeError):
-                continue
-            example_order.setdefault(name, len(example_order))
-        names.sort(key=lambda name: (example_order.get(name, len(example_order)), name.casefold()))
-
-        try:
-            records = [self.database.load(name) for name in names]
-        except (OSError, sqlite3.Error, ValueError, KeyError) as error:
+            records = self.bundled_circuits()
+        except (OSError, ValueError, KeyError) as error:
             QMessageBox.warning(self, "Cannot open circuit library", str(error))
             return
         self.library_page.set_records(records)
@@ -2009,11 +2344,44 @@ class CircuitWindow(QMainWindow):
         self.content_pages.setCurrentIndex(2)
         self.export_button.setEnabled(False)
 
+    def refresh_my_circuits(self):
+        if self.database is None:
+            self.database = CircuitDatabase()
+        records = [self.database.load(name) for name in self.database.list_names(origin="user")]
+        self.my_circuits_page.set_records(records)
+
+    def show_my_circuits(self):
+        try:
+            self.refresh_my_circuits()
+        except (OSError, sqlite3.Error, ValueError, KeyError) as error:
+            QMessageBox.warning(self, "Cannot open My Circuits", str(error))
+            return
+        self.navigation_buttons[1].setChecked(True)
+        self.set_workspace_panels(False)
+        self.content_pages.setCurrentIndex(1)
+        self.export_button.setEnabled(False)
+
     def open_library_circuit(self, name):
         try:
+            data = next(record for record in self.bundled_circuits() if record["name"] == name)
+        except (StopIteration, OSError, ValueError, KeyError) as error:
+            QMessageBox.warning(self, "Cannot load example", str(error))
+            return
+        self.clear_component_selection()
+        if self.load_topology(data):
+            # An example is a clean read-only baseline, never a personal record identity.
+            self.saved_record_name = None
+            self.saved_document = copy.deepcopy(data)
+            self.navigation_buttons[0].setChecked(True)
+            self.change_workspace_page(0)
+
+    def open_saved_circuit(self, name):
+        try:
+            if self.database is None or name not in self.database.list_names(origin="user"):
+                raise KeyError(name)
             data = self.database.load(name)
         except (OSError, sqlite3.Error, ValueError, KeyError) as error:
-            QMessageBox.warning(self, "Cannot load circuit", str(error))
+            QMessageBox.warning(self, "Cannot load saved circuit", str(error))
             return
         self.clear_component_selection()
         if self.load_topology(data):
@@ -2034,16 +2402,13 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     font_dir = Path(__file__).resolve().parent / "assets" / "fonts"
-    font_family = None
-    for filename in ("UlagadiSansRegular.ttf", "UlagadiSansMedium.ttf"):
+    for filename in ("DM_Sans/DMSans-VariableFont_opsz,wght.ttf",
+                     "Space_Grotesk/SpaceGrotesk-VariableFont_wght.ttf"):
         font_path = font_dir / filename
         font_id = QFontDatabase.addApplicationFont(str(font_path))
-        families = QFontDatabase.applicationFontFamilies(font_id)
-        if not families:
+        if not QFontDatabase.applicationFontFamilies(font_id):
             raise RuntimeError(f"Could not load the application font: {font_path}")
-        if font_family is None:
-            font_family = families[0]
-    font = QFont(font_family)
+    font = QFont("DM Sans")
     font.setPixelSize(14)
     font.setWeight(QFont.Weight.Normal)
     app.setFont(font)

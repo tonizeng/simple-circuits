@@ -38,11 +38,14 @@ class ExamplesBrowserTests(unittest.TestCase):
                 self.assertEqual(window.circuit.name, name)
                 self.assertEqual(window.content_pages.currentIndex(), 0)
                 self.assertTrue(window.component_details.isVisible())
-            data = database.load(expected[0])
-            data["custom_note"] = "preserve me"
+            original = window.library_page.records[0]
+            data = dict(original, custom_note="preserve me")
             database.save(data)
             window.show_examples()
             self.assertEqual(database.load(expected[0])["custom_note"], "preserve me")
+            self.assertEqual(window.library_page.records[0], original)
+            window.show_my_circuits()
+            self.assertEqual(window.my_circuits_page.records, [data])
             window.close()
 
     def test_browsing_library_does_not_replace_current_circuit(self):
