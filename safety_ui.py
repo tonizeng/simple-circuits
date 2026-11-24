@@ -137,7 +137,7 @@ class SafetyAlertsPanel(QFrame):
         self.fit_within_parent()
         self.raise_()
 
-    def set_compact_status(self, issues, checks_passed):
+    def set_compact_status(self, issues, checks_passed, power_approved=None, approval_reason=None):
         while self.cards.count():
             item = self.cards.takeAt(0)
             if item.widget() is not None:
@@ -159,7 +159,7 @@ class SafetyAlertsPanel(QFrame):
         elif checks_passed:
             headline, colour, icon = "Checks Passed ✓", "#51843c", "✓"
         else:
-            headline, colour, icon = "Waiting for a Circuit", "#666666", "○"
+            headline, colour, icon = "Waiting for Circuit Upload", "#666666", "○"
         self.handle = QLabel(headline)
         self.handle.setStyleSheet(f"font-family: 'DM Sans'; background: transparent; color: {colour}; font-size: 14px; font-weight: 600;")
         summary = QFrame()
@@ -174,12 +174,18 @@ class SafetyAlertsPanel(QFrame):
         headline_row.setContentsMargins(0, 0, 0, 0)
         headline_row.addWidget(self.handle, 1)
         summary_layout.addLayout(headline_row)
-        if issues or checks_passed:
-            approval = QLabel("Power approved" if checks_passed and not issues else "Power not approved")
+        if issues or checks_passed or power_approved is False:
+            approved = checks_passed and not issues if power_approved is None else power_approved
+            approval = QLabel("Power approved" if approved else "Power not approved")
             approval.setStyleSheet("font-family: 'DM Sans'; background: transparent; color: #596763; font-size: 14px; font-weight: 400;")
             approval.setWordWrap(True)
             approval.setContentsMargins(0, 0, 0, 0)
             summary_layout.addWidget(approval)
+            if approval_reason:
+                reason = QLabel(approval_reason)
+                reason.setWordWrap(True)
+                reason.setStyleSheet("background: transparent; color: #596763; font-size: 12px;")
+                summary_layout.addWidget(reason)
         if specific_issues:
             count_parts = []
             count_labels = []
@@ -273,9 +279,9 @@ class SafetyAlertsPanel(QFrame):
         self.fit_within_parent()
         self.show()
 
-    def set_issues(self, issues, checks_passed=False):
+    def set_issues(self, issues, checks_passed=False, power_approved=None, approval_reason=None):
         if self.embedded:
-            self.set_compact_status(issues, checks_passed)
+            self.set_compact_status(issues, checks_passed, power_approved, approval_reason)
             return
         while self.cards.count():
             item = self.cards.takeAt(0)

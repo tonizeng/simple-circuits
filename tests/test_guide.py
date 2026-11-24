@@ -19,9 +19,10 @@ class GuideTests(unittest.TestCase):
         window.guide_button.click()
         guide = window.guide_dialog
         self.assertFalse(guide.isModal())
-        self.assertEqual(guide.tabs.tabText(0), "Understanding the circuit")
-        self.assertEqual(guide.tabs.tabText(1), "Navigation")
-        self.assertEqual(guide.tabs.tabText(2), "Terminology")
+        self.assertEqual(guide.tabs.tabText(0), "Getting Started")
+        self.assertEqual(guide.tabs.tabText(1), "Understanding the circuit")
+        self.assertEqual(guide.tabs.tabText(2), "Navigation")
+        self.assertEqual(guide.tabs.tabText(3), "Terminology")
         text = "\n".join(label.text() for label in guide.findChildren(QLabel))
         for phrase in ("Voltage and polarity", "Current direction", "Ground reference", "Unavailable values", "Nominal", "Calculated", "Measured", "Open circuit", "Short circuit"):
             self.assertIn(phrase, text)

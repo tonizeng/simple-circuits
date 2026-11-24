@@ -6,6 +6,15 @@ from PySide6.QtWidgets import QApplication,QLineEdit,QDialogButtonBox
 from database import CircuitDatabase
 from main import CircuitWindow
 
+def confirm_save(window):
+    from PySide6.QtWidgets import QDialogButtonBox
+    window.save_button.click()
+    dialog = getattr(window, 'save_dialog', None)
+    if dialog is not None:
+        dialog.primary_button.click()
+    assert getattr(window, 'save_dialog', None) is None
+
+
 class TitleSaveTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
@@ -25,7 +34,7 @@ class TitleSaveTests(unittest.TestCase):
         self.assertEqual(self.database.list_names(),[])
         self.assertEqual(self.window.circuit.name,'My LED circuit')
         self.assertTrue(self.window.has_unsaved_circuit())
-        self.window.save_button.click()
+        confirm_save(self.window)
         self.assertEqual(self.database.load('My LED circuit'),dict(self.data,name='My LED circuit'))
         self.assertEqual(self.data,original)
         self.assertFalse(self.window.has_unsaved_circuit())
@@ -35,14 +44,14 @@ class TitleSaveTests(unittest.TestCase):
         dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Save).click()
         self.assertEqual(self.window.circuit.name,'Renamed from pencil')
         self.assertEqual(self.database.list_names(),[])
-        self.window.save_button.click()
+        confirm_save(self.window)
         self.assertEqual(self.database.load('Renamed from pencil')['name'],'Renamed from pencil')
     def test_saved_rename_persists_only_when_saved(self):
         self.database.save(self.data);self.window.load_topology(self.data)
         self.window.circuit_name.setText('Renamed saved circuit');self.window.rename_circuit_title()
         self.assertEqual(self.database.list_names(),[self.data['name']])
         self.assertEqual(self.database.load(self.data['name']),self.data)
-        self.window.save_button.click()
+        confirm_save(self.window)
         self.assertEqual(self.database.list_names(),['Renamed saved circuit'])
     def test_duplicate_name_does_not_overwrite_or_delete_records(self):
         self.database.save(self.data);self.window.load_topology(self.data)
@@ -62,14 +71,14 @@ class TitleSaveTests(unittest.TestCase):
     def test_empty_circuit_saved_reopened_and_renamed(self):
         w=self.window;w.create_blank_circuit();w.circuit_name.setText('Empty sketch');w.rename_circuit_title()
         self.assertEqual(self.database.list_names(),[])
-        w.save_button.click();saved=self.database.load('Empty sketch')
+        confirm_save(w);saved=self.database.load('Empty sketch')
         self.assertEqual(saved['components'],[]);self.assertEqual(saved['nets'],[])
         w.load_topology(saved)
         self.assertIsNone(w.circuit);self.assertFalse(w.current_safety_issues)
         self.assertFalse(w.has_unsaved_circuit());self.assertFalse(w.export_button.isEnabled())
         w.circuit_name.setText('Empty renamed');w.rename_circuit_title()
         self.assertEqual(self.database.list_names(),['Empty sketch'])
-        w.save_button.click();self.assertEqual(self.database.list_names(),['Empty renamed'])
+        confirm_save(w);self.assertEqual(self.database.list_names(),['Empty renamed'])
         w.refresh_my_circuits()
         self.assertIn('Empty renamed',w.my_circuits_page.open_buttons)
 

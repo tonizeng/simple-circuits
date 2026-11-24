@@ -37,7 +37,7 @@ potentiometer wipers. Falstad runs its own simulation; results may differ.
 Settings let users choose and save component, node, and current-arrow colours.
 Battery voltage/current telemetry can feed the protection API and update calculations.
 Physical current limiting/cutoff still requires firmware and hardware support; serial
-integration, UI saving, and transient simulation remain pending.
+integration remains pending. Save supports new circuits, personal copies, updates, and uploaded builds in reference mode; all saves go to My Circuits.
 
 ## useful commands
 
@@ -82,3 +82,4 @@ Python.
 - 2026-11-12 — add circuit validation logic
 - 2026-11-16 — changed ui
 - 2026-11-23 — modernize ui
+- 2026-11-23 — add building from scrach + reference

@@ -172,6 +172,7 @@ class ComponentDetailsPanel(QFrame):
         self.close_button.setAccessibleName("Back to circuit overview")
         self.close_button.setToolTip("Back to circuit overview")
         self.close_button.clicked.connect(self.close_or_clear)
+        identity.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
         self.close_button.hide()
         layout.addLayout(identity)
         header_divider = QFrame()
@@ -277,7 +278,7 @@ class ComponentDetailsPanel(QFrame):
         self.component_id = None
         self.node_id = net.id
         self.selection_prompt.hide()
-        self.close_button.hide()
+        self.close_button.show()
         self.close_button.setAccessibleName("Back to circuit overview")
         is_ground = net.id == ground_node
         self.title.setText(f"{net.id} · {'Ground' if is_ground else 'Node'}")
@@ -471,7 +472,7 @@ class ComponentDetailsPanel(QFrame):
             self.component_id = component.id
             self.title.setText(f"{component.id} · {COMPONENT_NAMES[component.type]}")
             self.selection_prompt.hide()
-            self.close_button.hide()
+            self.close_button.show()
             self.close_button.setAccessibleName("Back to circuit overview")
             self.subtitle.setText(TYPE_SUBTITLES[component.type])
             self.subtitle.show()

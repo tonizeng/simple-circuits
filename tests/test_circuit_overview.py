@@ -29,11 +29,12 @@ class OverviewTests(unittest.TestCase):
 
     def test_overview_badges_lists_and_component_selection(self):
         panel = self.window.component_details
-        text = "\n".join(label.text() for label in panel.scroll.widget().findChildren(QLabel))
-        self.assertIn("Components", text)
-        self.assertIn("3 components", [label.accessibleName() for label in panel.scroll.widget().findChildren(QLabel)])
-        self.assertIn("Nodes", text)
-        self.assertIn("3 nodes", [label.accessibleName() for label in panel.scroll.widget().findChildren(QLabel)])
+        headings = {button.text(): button for button in panel.scroll.widget().findChildren(QPushButton)}
+        self.assertIn("Components (3)", headings)
+        self.assertIn("Nodes (3)", headings)
+        headings["Components (3)"].click()
+        self.assertTrue(self.window.component_legend.isHidden())
+        headings["Components (3)"].click()
         self.app.processEvents()
         self.assertTrue(self.window.component_legend.isVisible())
         self.window.component_legend.cellWidget(2, 0).click()

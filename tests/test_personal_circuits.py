@@ -6,6 +6,15 @@ from main import CircuitWindow
 from database import CircuitDatabase
 ROOT=Path(__file__).resolve().parents[1]
 
+def confirm_save(window):
+    from PySide6.QtWidgets import QDialogButtonBox
+    window.save_button.click()
+    dialog = getattr(window, 'save_dialog', None)
+    if dialog is not None:
+        dialog.primary_button.click()
+    assert getattr(window, 'save_dialog', None) is None
+
+
 class PersonalCircuitPagesTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
@@ -19,29 +28,25 @@ class PersonalCircuitPagesTests(unittest.TestCase):
         self.assertEqual(self.db.list_names(),[])
         self.window.show_my_circuits()
         self.assertEqual(self.window.my_circuits_page.records,[])
-    def test_save_example_copy_to_my_circuits_only(self):
+    def test_library_view_save_is_disabled(self):
         w=self.window;w.show_examples();original=list(w.library_page.records);sample=original[0]
+        self.assertFalse(w.save_button.isEnabled())
         w.open_library_circuit(sample['name'])
-        w.circuit_name.setText('My copy');w.rename_circuit_title()
-        self.assertEqual(self.db.list_names(origin='user'),[])
+        self.assertFalse(w.save_button.isEnabled())
         w.save_button.click()
-        self.assertIn('My copy',w.my_circuits_page.open_buttons)
+        self.assertEqual(self.db.list_names(origin='user'),[])
+        self.assertIsNone(getattr(w,'save_dialog',None))
         w.show_examples();self.assertEqual(w.library_page.records,original)
-        w.navigation_buttons[1].click()
-        self.assertEqual([d['name'] for d in w.my_circuits_page.records],['My copy'])
-        w.my_circuits_page.open_buttons['My copy'].click()
-        self.assertEqual(w.circuit.name,'My copy')
-        self.assertEqual(w.content_pages.currentIndex(),0)
     def test_personal_copy_can_share_example_name_without_modifying_library(self):
         w=self.window;w.show_examples();sample=w.library_page.records[0]
-        w.open_library_circuit(sample['name']);w.save_button.click()
+        w.load_topology(sample);w.change_workspace_page(0);confirm_save(w)
         self.assertEqual(self.db.list_names(origin='user'),[sample['name']])
-        w.circuit_document['notes']='Personal note';w.save_button.click()
+        w.circuit_document['notes']='Personal note';confirm_save(w)
         w.show_examples()
         self.assertEqual(next(d for d in w.library_page.records if d['name']==sample['name']),sample)
         self.assertEqual(self.db.load(sample['name'])['notes'],'Personal note')
     def test_saved_empty_circuit_appears_and_opens_from_my_circuits(self):
-        w=self.window;w.new_circuit();w.circuit_name.setText('Empty personal circuit');w.rename_circuit_title();w.save_button.click()
+        w=self.window;w.new_circuit();w.circuit_name.setText('Empty personal circuit');w.rename_circuit_title();confirm_save(w)
         w.show_my_circuits();w.my_circuits_page.open_buttons['Empty personal circuit'].click()
         self.assertIsNone(w.circuit)
         self.assertEqual(w.circuit_name.text(),'Empty personal circuit')
@@ -49,10 +54,10 @@ class PersonalCircuitPagesTests(unittest.TestCase):
         self.assertFalse(w.has_unsaved_circuit())
         self.assertTrue(w.overview_dock.isHidden())
     def test_saved_rename_updates_only_personal_page_on_save(self):
-        w=self.window;w.new_circuit();w.circuit_name.setText('Original');w.rename_circuit_title();w.save_button.click()
+        w=self.window;w.new_circuit();w.circuit_name.setText('Original');w.rename_circuit_title();confirm_save(w)
         w.circuit_name.setText('Renamed');w.rename_circuit_title()
         self.assertEqual(self.db.list_names(origin='user'),['Original'])
-        w.save_button.click()
+        confirm_save(w)
         self.assertEqual(self.db.list_names(origin='user'),['Renamed'])
         self.assertEqual([d['name'] for d in w.my_circuits_page.records],['Renamed'])
 

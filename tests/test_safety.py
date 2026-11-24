@@ -247,7 +247,7 @@ class SafetyUITests(unittest.TestCase):
         self.assertIsNotNone(dialog)
         self.assertFalse(dialog.isWindow())
         self.assertIs(dialog.parentWidget(), self.window.circuit_status_card)
-        self.assertIn('Errors detected', [label.text() for label in dialog.findChildren(QLabel)])
+        self.assertIn('Errors Detected ⊗', [label.text() for label in dialog.findChildren(QLabel)])
         self.assertIn('3.3 V', self.window.safety_status_text)
 
     def test_open_path_shows_warning_card(self):
@@ -255,7 +255,7 @@ class SafetyUITests(unittest.TestCase):
         data = json.loads((EXAMPLES / 'incomplete/03_parallel_resistors_incomplete.json').read_text())
         data['components'][0]['parameters']['voltage_v'] = 3.3
         self.window.load_topology(data)
-        self.assertIn('Review required', [l.text() for l in self.window.safety_panel.findChildren(QLabel)])
+        self.assertIn('Review Required ⚠', [l.text() for l in self.window.safety_panel.findChildren(QLabel)])
         self.assertFalse(self.window.safety_report.allowed)
 
     def test_board_request_gets_green_light_for_measured_valid_topology(self):
@@ -309,7 +309,7 @@ class SafetyUITests(unittest.TestCase):
         self.window.load_topology(resistor_circuit())
         self.assertEqual(panel.issues, ())
         self.assertTrue(panel.isVisible())
-        self.assertEqual(panel.handle.text(), "Checks passed")
+        self.assertEqual(panel.handle.text(), "Checks Passed ✓")
 
     def test_short_badge_identifies_shorting_wire_with_message(self):
         from schematic import DiagnosticBadge
@@ -394,7 +394,7 @@ class SafetyUITests(unittest.TestCase):
         from schematic import DiagnosticBadge
         self.window.load_topology((EXAMPLES / 'errors/02_short_disconnected_led.json').read_bytes())
         panel = self.window.safety_panel
-        self.assertEqual(panel.handle.text(), "Errors detected")
+        self.assertEqual(panel.handle.text(), "Errors Detected ⊗")
         self.assertIn("Power not approved", [l.text() for l in panel.findChildren(QLabel)])
         rows = [b for b in panel.findChildren(QPushButton) if b.objectName() == "issueRow"]
         codes = [row.property("issueCode") for row in rows]
@@ -409,14 +409,15 @@ class SafetyUITests(unittest.TestCase):
         sidebar_layout = self.window.circuit_sidebar.layout()
         self.assertIs(sidebar_layout.itemAt(0).widget(), self.window.circuit_status_card)
 
-    def test_any_warning_shows_calculation_summary_even_when_solver_succeeds(self):
+    def test_warning_summary_keeps_power_blocked_even_when_solver_succeeds(self):
         from PySide6.QtWidgets import QLabel
         self.window.load_topology((EXAMPLES / 'incomplete/03_parallel_resistors_incomplete.json').read_bytes())
         self.assertEqual(self.window.simulation_result.status, "solved")
         self.assertTrue(self.window.current_safety_issues)
         summary = self.window.safety_panel.findChild(QLabel, "calculationAvailability")
-        self.assertIsNotNone(summary)
-        self.assertFalse(summary.isHidden())
+        self.assertIsNone(summary)
+        self.assertFalse(self.window.safety_report.allowed)
+        self.assertIn("Power not approved", [label.text() for label in self.window.safety_panel.findChildren(QLabel)])
 
     def test_calculation_availability_is_a_summary_not_a_clickable_fault(self):
         from PySide6.QtWidgets import QPushButton, QLabel
@@ -424,11 +425,11 @@ class SafetyUITests(unittest.TestCase):
         panel = self.window.safety_panel
         rows = [b for b in panel.findChildren(QPushButton) if b.objectName() == "issueRow"]
         self.assertNotIn("unknown_current", [row.property("issueCode") for row in rows])
-        self.assertIsNotNone(panel.findChild(QLabel, "calculationAvailability"))
+        self.assertIsNone(panel.findChild(QLabel, "calculationAvailability"))
         self.assertIn("unknown_current", {issue.code for issue in self.window.current_safety_issues})
         self.assertFalse(self.window.safety_report.allowed)
         panel.set_issues((SafetyIssue("unresolved_circuit", "Values unavailable", severity="warning"),))
-        self.assertEqual(panel.handle.text(), "Checks incomplete")
+        self.assertEqual(panel.handle.text(), "Checks Incomplete")
         self.assertIn("Power not approved", [label.text() for label in panel.findChildren(QLabel)])
 
     def test_short_selection_highlights_both_source_and_shorting_wire(self):

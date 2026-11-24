@@ -9,6 +9,7 @@ from components import COMPONENT_NAMES
 
 class CircuitLibraryPage(QWidget):
     circuit_requested = Signal(str)
+    build_requested = Signal(str)
 
     def __init__(self, parent=None, *, title="Circuit Library", empty_message="No circuits are available yet."):
         super().__init__(parent)
@@ -111,7 +112,16 @@ class CircuitLibraryPage(QWidget):
             button.setObjectName("openLibraryCircuit")
             button.setAccessibleName("Open " + data['name'])
             button.clicked.connect(lambda checked=False, name=data['name']: self.circuit_requested.emit(name))
-            details.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
+            actions = QHBoxLayout()
+            actions.addWidget(button)
+            build_button = QPushButton("Build This Circuit")
+            build_button.setObjectName("openLibraryCircuit")
+            build_button.setAccessibleName("Build " + data['name'])
+            build_button.setEnabled(bool(data.get('components')))
+            build_button.clicked.connect(lambda checked=False, name=data['name']: self.build_requested.emit(name))
+            actions.addWidget(build_button)
+            actions.addStretch()
+            details.addLayout(actions)
             self.open_buttons[data['name']] = button
             row.addLayout(details, 1)
             column.addWidget(card)

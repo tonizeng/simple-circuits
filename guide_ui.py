@@ -2,6 +2,14 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QTabWidget, QScrollArea, QWidget
 
+WORKFLOW_TOPICS = (
+    ("Building from Scratch", "Start with New Circuit and build your own circuit using the physical toy. Press the board button to upload its topology, run safety checks, and display the schematic and theoretical values."),
+    ("Viewing Circuit", "Open a circuit from My Circuits or Circuit Library to inspect its saved design and calculated values. Viewing does not compare it with the physical toy or change the saved circuit."),
+    ("Building from Reference", "Select Build Circuit to recreate the open circuit on the physical toy. My Circuits contains your saved circuits; Circuit Library contains the provided examples. Upload your build using the board button to compare its components and connections with the reference and run safety checks on the uploaded circuit."),
+    ("Returning to viewing", "Back to View Mode stops comparison and returns to the saved reference. It does not replace the reference with the physical build or save a new circuit."),
+    ("Build matching and safety", "Matching the reference and passing safety checks are separate results. Reference mode requires both before power approval; scratch mode requires safety checks only. The reference remains unchanged during comparison. The firmware controls physical power; hardware upload integration is not connected yet."),
+)
+
 CIRCUIT_TOPICS = (
     ("Components and terminals", "V1, R1, and LED1 identify individual components. The number beside a component connection is its terminal number. Most components use terminals 1 and 2; a potentiometer uses terminal 3 for its wiper."),
     ("Nodes and connections", "A node groups electrically connected terminals. All terminals on that node have the same voltage, measured relative to ground. Junction dots mark joins."),
@@ -16,7 +24,7 @@ NAVIGATION_TOPICS = (
     ("Selecting items", "Select a component or node in the schematic or Circuit Overview to view its details."),
     ("Colours and fault symbols", "Selection uses one shared colour for components and nodes, purple by default. Current arrows are blue by default. Settings lets you change these colours. Green status means checks passed; red indicates an error and amber indicates a warning. Fault symbols remain beside affected locations in the schematic."),
     ("Circuit Status", "Circuit Status lists errors and warnings. Click a located issue to reveal its affected component or connection."),
-    ("Zoom and labels", "Use the mouse wheel or zoom toolbar to zoom within the schematic. Fit brings the circuit into view. Enable Pan in the toolbar to drag with the left mouse button, or drag with the middle mouse button at any time. Show labels controls node names and terminal numbers; component values and fault symbols remain visible."),
+    ("Zoom and labels", "Use the mouse wheel or zoom toolbar to zoom within the schematic. Fit brings the circuit into view. Enable Pan in the toolbar to drag with the left mouse button, or drag with the middle mouse button at any time. Show Labels controls node names and terminal numbers; component values and fault symbols remain visible."),
 )
 
 TERMS = (
@@ -61,6 +69,7 @@ class CircuitGuideDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         self.tabs = QTabWidget()
         self.tabs.setAccessibleName("Circuit Guide sections")
+        self.tabs.addTab(self.topic_page(WORKFLOW_TOPICS), "Getting Started")
         self.tabs.addTab(self.topic_page(CIRCUIT_TOPICS), "Understanding the circuit")
         self.tabs.addTab(self.topic_page(NAVIGATION_TOPICS), "Navigation")
         self.tabs.addTab(self.topic_page(TERMS), "Terminology")

@@ -82,15 +82,16 @@ class CircuitDatabase:
             )
         return name
 
-    def save_workspace(self, data, previous_name=None):
+    def save_workspace(self, data, previous_name=None, require_new=False):
         """Save a workspace and atomically rename its own record without collisions."""
         if not isinstance(data, dict) or not isinstance(data.get("name"), str) or not data["name"].strip():
             raise ValueError("Circuit name cannot be empty.")
         name = data["name"]
         contents = json.dumps(data, allow_nan=False)
         with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute("SELECT circuit_json, origin FROM circuits WHERE name = ?", (name,)).fetchone()
-            if existing and existing[1] == "user" and previous_name != name and json.loads(existing[0]) != data:
+            if existing and existing[1] == "user" and (require_new or (previous_name != name and json.loads(existing[0]) != data)):
                 raise ValueError("That name already exists. Choose another name.")
             connection.execute("INSERT INTO circuits (name, circuit_json, origin) VALUES (?, ?, 'user') "
                                "ON CONFLICT(name) DO UPDATE SET circuit_json = excluded.circuit_json, origin = 'user'", (name, contents))

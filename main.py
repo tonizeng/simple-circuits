@@ -17,6 +17,8 @@ from topology import parse_topology, TopologyError
 from schematic import render_circuit, ComponentSymbol, NetWire, DEFAULT_HIGHLIGHT_COLORS
 from components import COMPONENT_NAMES, COMPONENT_DESCRIPTIONS, nominal_label
 from database import CircuitDatabase
+from save_ui import SaveCircuitDialog
+from build_reference import compare_build
 from formula_reference import FORMULA_TOPICS, FORMULA_EQUATIONS, FORMULA_CAPTIONS
 from simulation import solve_dc, SimulationResult
 from simulation.rlc import series_rlc
@@ -331,7 +333,7 @@ class SchematicView(QGraphicsView):
         display_layout = QHBoxLayout(self.display_controls)
         display_layout.setContentsMargins(6, 8, 6, 8)
         display_layout.setSpacing(3)
-        self.labels_toggle = QCheckBox("Show labels")
+        self.labels_toggle = QCheckBox("Show Labels")
         self.labels_toggle.setChecked(True)
         self.labels_toggle.setToolTip("Show node names and terminal numbers")
         checkmark_path = (Path(__file__).resolve().parent / "assets" / "images" / "checkmark.svg").as_posix()
@@ -343,7 +345,7 @@ class SchematicView(QGraphicsView):
         """.replace("CHECKMARK_PATH", checkmark_path))
         self.labels_toggle.toggled.connect(self.set_labels_visible)
         display_layout.addWidget(self.labels_toggle)
-        self.legend_toggle = QCheckBox("Show legend")
+        self.legend_toggle = QCheckBox("Show Convention")
         self.legend_toggle.setChecked(True)
         self.legend_toggle.setStyleSheet(self.labels_toggle.styleSheet())
         self.legend_toggle.setAccessibleName("Show sign convention legend")
@@ -475,7 +477,7 @@ class SchematicView(QGraphicsView):
         current_note = "<b>Positive current:</b> terminal 1 → terminal 2" if signed else "<b>Current:</b> displays magnitude, arrows show conventional direction."
         self.current_reference.setText("<b style='color: #42447a;'>Sign Convention</b><br><b>Voltage:</b> voltage at terminal 1 − voltage at terminal 2<br>" + current_note)
         self.current_reference.setVisible(self.legend_toggle.isChecked())
-        self.current_reference.setFixedWidth(min(380, max(1, self.viewport().width() - 20)))
+        self.current_reference.setFixedWidth(min(460, max(1, self.viewport().width() - 20)))
         self.current_reference.setFixedHeight(max(1, self.current_reference.heightForWidth(self.current_reference.width())))
         self.current_reference.move(10, 10)
         self.current_reference.raise_()
@@ -501,6 +503,14 @@ class SchematicView(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, "zoom_controls"):
+            for checkbox in (self.labels_toggle, self.legend_toggle):
+                checkbox.ensurePolished()
+                checkbox.setMinimumWidth(checkbox.sizeHint().width())
+            controls_width = max(self.zoom_controls.layout().sizeHint().width(),
+                                 self.display_controls.layout().sizeHint().width())
+            self.zoom_controls.setFixedWidth(controls_width)
+            self.display_controls.setFixedWidth(controls_width)
+            self.display_controls.setFixedHeight(self.display_controls.layout().sizeHint().height())
             self.zoom_controls.move(max(8, self.viewport().width() - self.zoom_controls.width() - 10), 10)
             self.zoom_controls.raise_()
             self.display_controls.move(max(8, self.viewport().width() - self.display_controls.width() - 10), self.zoom_controls.y() + self.zoom_controls.height() + 8)
@@ -736,7 +746,8 @@ class CircuitWindow(QMainWindow):
 
         header = AppHeader()
         header.setObjectName("header")
-        header.setFixedHeight(96)
+        header.setMinimumHeight(96)
+        header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         header_divider = QFrame(header)
         header_divider.setObjectName("headerEdgeDivider")
         header_divider.setStyleSheet("QFrame#headerEdgeDivider { background: #d9dddd; border: none; }")
@@ -788,7 +799,23 @@ class CircuitWindow(QMainWindow):
                 pencil_button.setIconSize(QSize(24, 24))
         edit_title.setToolTip("Rename circuit")
         edit_title.triggered.connect(self.edit_circuit_title)
-        left_layout.addWidget(self.circuit_name)
+        title_group = QWidget()
+        title_group.setObjectName("circuitTitleGroup")
+        title_group.setStyleSheet("QWidget#circuitTitleGroup { background: transparent; }")
+        title_column = QVBoxLayout(title_group)
+        title_column.setContentsMargins(10, 8, 10, 8)
+        title_column.setSpacing(2)
+        title_column.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        title_column.addWidget(self.circuit_name)
+        self.mode_row = QHBoxLayout()
+        self.mode_row.setContentsMargins(0, 0, 0, 0)
+        self.mode_row.setSpacing(8)
+        self.circuit_mode_label = QLabel("Building from Scratch")
+        self.circuit_mode_label.hide()
+        self.circuit_mode_label.setStyleSheet("font-family: 'DM Sans'; font-size: 11px; color: #596e6b; background: transparent;")
+        self.mode_row.addWidget(self.circuit_mode_label)
+        self.mode_row.addStretch()
+        left_layout.addWidget(title_group)
         self.settings_button = IconTextButton("")
         self.settings_button.setAccessibleName("Settings")
         self.settings_button.setToolTip("Settings")
@@ -809,18 +836,22 @@ class CircuitWindow(QMainWindow):
         self.new_circuit_button.clicked.connect(self.new_circuit)
         right_layout.addWidget(self.new_circuit_button)
         self.save_button = IconTextButton("Save")
-        self.save_button.clicked.connect(self.save_circuit_title)
+        self.save_button.clicked.connect(self.save_current_circuit)
         self.guide_button = IconTextButton("")
         self.guide_button.setAccessibleName("Open Circuit Guide")
         self.guide_button.clicked.connect(self.show_guide)
         left_layout.insertWidget(left_layout.count() - 1, self.guide_button)
         right_layout.addWidget(self.save_button)
+        self.save_as_button = IconTextButton("Save As…")
+        self.save_as_button.clicked.connect(self.open_save_dialog)
+        right_layout.addWidget(self.save_as_button)
         self.export_button = IconTextButton("Export to Falstad")
         self.export_button.clicked.connect(self.open_in_falstad)
         right_layout.addWidget(self.export_button)
         for button, asset in ((self.new_circuit_button, "file-plus.svg"),
                               (self.settings_button, "settings.svg"),
                               (self.save_button, "save.svg"),
+                              (self.save_as_button, "save.svg"),
                               (self.guide_button, "circle-help.svg"),
                               (self.export_button, "square-arrow-up-right-exit.svg")):
             button.setObjectName("headerActionButton")
@@ -834,7 +865,16 @@ class CircuitWindow(QMainWindow):
             icon_extent = 24 if button in (self.settings_button, self.guide_button) else 20
             renderer.render(icon_painter, QRectF(0, 0, icon_extent, icon_extent))
             icon_painter.end()
-            button.setIcon(QIcon(icon))
+            button_icon = QIcon(icon)
+            disabled_renderer = QSvgRenderer(path.read_bytes().replace(b"currentColor", b"#adb5b2").replace(b"#222222", b"#adb5b2"))
+            disabled_pixmap = QPixmap(icon.size())
+            disabled_pixmap.setDevicePixelRatio(3)
+            disabled_pixmap.fill(Qt.GlobalColor.transparent)
+            disabled_painter = QPainter(disabled_pixmap)
+            disabled_renderer.render(disabled_painter, QRectF(0, 0, icon_extent, icon_extent))
+            disabled_painter.end()
+            button_icon.addPixmap(disabled_pixmap, QIcon.Mode.Disabled)
+            button.setIcon(button_icon)
             button.setIconSize(QSize(icon_extent, icon_extent))
             button.setFixedHeight(44)
             button.setStyleSheet("""
@@ -847,6 +887,7 @@ class CircuitWindow(QMainWindow):
                 QPushButton#headerActionButton:hover { background: #f1f1f1; color: #555555; }
                 QPushButton#headerActionButton:pressed { background: #f1f1f1; color: #555555; }
                 QPushButton#headerActionButton:focus { border: none; }
+                QPushButton#headerActionButton:disabled { background: #f8f9f9; color: #adb5b2; }
             """)
         header_layout.addWidget(left_header)
         header_layout.addStretch()
@@ -956,6 +997,25 @@ class CircuitWindow(QMainWindow):
         self.safety_panel.set_issues(())
         status_layout.addWidget(self.safety_panel)
         circuit_sidebar_layout.insertWidget(0, self.circuit_status_card)
+        self.build_comparison_card, comparison_layout = sidebar_card("Build Comparison")
+        self.build_comparison_heading = QLabel("Waiting for Circuit Upload")
+        self.build_comparison_heading.setWordWrap(True)
+        self.build_comparison_heading.setStyleSheet("font-family: 'DM Sans'; font-size: 14px; font-weight: 600; color: #666666; background: transparent;")
+        self.build_comparison_label = QLabel("Press the board button to upload your build.")
+        self.build_comparison_label.setStyleSheet("font-family: 'DM Sans'; font-size: 14px; font-weight: 400; color: #596763; background: transparent;")
+        self.build_comparison_label.setWordWrap(True)
+        self.build_comparison_label.setTextFormat(Qt.TextFormat.PlainText)
+        comparison_inner = QFrame()
+        comparison_inner.setObjectName("buildComparisonInner")
+        comparison_inner.setStyleSheet("QFrame#buildComparisonInner { background: #ffffff; border: none; border-radius: 10px; } QLabel { background: transparent; }")
+        comparison_inner_layout = QVBoxLayout(comparison_inner)
+        comparison_inner_layout.setContentsMargins(12, 12, 12, 12)
+        comparison_inner_layout.setSpacing(3)
+        comparison_inner_layout.addWidget(self.build_comparison_heading)
+        comparison_inner_layout.addWidget(self.build_comparison_label)
+        comparison_layout.addWidget(comparison_inner)
+        self.build_comparison_card.hide()
+        circuit_sidebar_layout.insertWidget(1, self.build_comparison_card)
         circuit_sidebar_layout.addStretch(1)
         self.circuit_sidebar_scroll = QScrollArea()
         self.circuit_sidebar_scroll.setWidgetResizable(True)
@@ -1040,6 +1100,10 @@ class CircuitWindow(QMainWindow):
         self.canvas.setAccessibleName("Circuit schematic canvas")
         self.canvas.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.circuit = None
+        self.reference_document = None
+        self.detected_build_document = None
+        self.viewing_saved_circuit = False
+        self.viewing_library_circuit = False
         self.simulation_result = None
         schematic_area = QVBoxLayout()
         schematic_area.setContentsMargins(10, 10, 10, 10)
@@ -1054,6 +1118,45 @@ class CircuitWindow(QMainWindow):
         self.schematic_frame.setGraphicsEffect(outer_shadow)
         frame_layout = QVBoxLayout(self.schematic_frame)
         frame_layout.setContentsMargins(16, 16, 16, 16)
+        self.build_toolbar = QFrame()
+        self.build_toolbar.setObjectName("buildToolbar")
+        self.build_toolbar.setStyleSheet("QFrame#buildToolbar { background: #f3f6f5; border: none; border-radius: 10px; } QPushButton { background: white; border: none; border-radius: 8px; padding: 8px 12px; font-family: 'DM Sans'; font-weight: 500; } QPushButton:hover { background: #e7e3f3; }")
+        build_layout = QVBoxLayout(self.build_toolbar)
+        build_layout.setContentsMargins(12, 10, 12, 10)
+        build_layout.setSpacing(6)
+        build_row = QHBoxLayout()
+        self.reference_title_label = QLabel("Building from Scratch")
+        self.reference_title_label.setWordWrap(True)
+        self.reference_title_label.setStyleSheet("font-family: 'DM Sans'; font-weight: 600; color: #42447a; background: transparent;")
+        banner_text = QVBoxLayout()
+        banner_text.setContentsMargins(0, 0, 0, 0)
+        banner_text.setSpacing(6)
+        banner_text.setAlignment(Qt.AlignmentFlag.AlignTop)
+        banner_text.addWidget(self.reference_title_label)
+        build_row.addLayout(banner_text, 1)
+        self.build_reference_button = QPushButton("Build Circuit")
+        self.build_reference_button.clicked.connect(self.start_reference_build)
+        self.build_reference_button.setStyleSheet("QPushButton { color: #42447a; background: white; border: none; border-radius: 8px; font-family: 'DM Sans'; font-size: 14px; font-weight: 500; padding: 8px 12px; } QPushButton:hover { background: #e7e3f3; }")
+        self.build_reference_button.hide()
+        build_row.addWidget(self.build_reference_button, 0, Qt.AlignmentFlag.AlignTop)
+        self.end_build_button = QPushButton("Back to View Mode")
+        self.end_build_button.clicked.connect(self.end_reference_build)
+        self.end_build_button.hide()
+        build_row.addWidget(self.end_build_button, 0, Qt.AlignmentFlag.AlignTop)
+        build_layout.addLayout(build_row)
+        self.reference_title_label.show()
+        self.build_status_label = QLabel("Press the button on your board to upload your circuit, run safety checks, view its schematic, and theoretical values.")
+        self.build_status_label.setWordWrap(True)
+        self.build_status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.build_status_label.setStyleSheet("background: transparent; color: #596e6b; font-size: 13px;")
+        banner_text.addWidget(self.build_status_label)
+        self.exit_reference_description = QLabel("Back to View Mode returns to the saved reference. To build something different with these pieces, choose New Circuit.")
+        self.exit_reference_description.setWordWrap(True)
+        self.exit_reference_description.setStyleSheet("background: transparent; color: #596e6b; font-size: 12px;")
+        self.exit_reference_description.hide()
+        banner_text.addWidget(self.exit_reference_description)
+        frame_layout.addWidget(self.build_toolbar)
+        build_layout.setContentsMargins(12, 8, 12, 8)
         frame_layout.addWidget(self.canvas)
         schematic_area.addWidget(self.schematic_frame, 1)
         self.protection_timer = QTimer(self)
@@ -1066,9 +1169,11 @@ class CircuitWindow(QMainWindow):
         self.content_pages.addWidget(circuit_page)
         self.my_circuits_page = CircuitLibraryPage(title="My Circuits", empty_message="No saved circuits yet. Use Save to keep your current circuit here.")
         self.my_circuits_page.circuit_requested.connect(self.open_saved_circuit)
+        self.my_circuits_page.build_requested.connect(self.build_saved_reference)
         self.content_pages.addWidget(self.my_circuits_page)
         self.library_page = CircuitLibraryPage()
         self.library_page.circuit_requested.connect(self.open_library_circuit)
+        self.library_page.build_requested.connect(self.build_library_reference)
         self.content_pages.addWidget(self.library_page)
         self.page_navigation.idClicked.connect(self.change_workspace_page)
         self.content_pages.setObjectName("workspaceFrame")
@@ -1163,10 +1268,10 @@ class CircuitWindow(QMainWindow):
             icon_button.setFixedSize(44, 44)
         for icon_button in (self.settings_button, self.guide_button, self.views_button):
             icon_button.setStyleSheet("QPushButton#headerActionButton { background: transparent; color: black; border: none; padding: 10px; } QPushButton#headerActionButton:hover, QPushButton#headerActionButton:pressed { background: transparent; color: #555555; }")
-        for action_button in (self.new_circuit_button, self.save_button, self.export_button):
+        for action_button in (self.new_circuit_button, self.save_button, self.save_as_button, self.export_button):
             action_button.setStyleSheet(action_button.styleSheet() + "QPushButton#headerActionButton, QPushButton#headerActionButton:focus { border: none; }")
         for raised_control in (self.circuit_name, self.new_circuit_button,
-                               self.save_button, self.export_button):
+                               self.save_button, self.save_as_button, self.export_button):
             header_shadow = QGraphicsDropShadowEffect(raised_control)
             header_shadow.setBlurRadius(18)
             header_shadow.setOffset(0, 0)
@@ -1392,6 +1497,8 @@ class CircuitWindow(QMainWindow):
         return data
 
     def has_unsaved_circuit(self):
+        if self.reference_document is not None:
+            return self.detected_build_document is not None and self.detected_build_document != getattr(self, "saved_uploaded_document", None)
         current = self.workspace_document()
         if self.saved_document is not None:
             return current != self.saved_document
@@ -1425,8 +1532,8 @@ class CircuitWindow(QMainWindow):
             if choice == QMessageBox.StandardButton.Cancel:
                 return
             if choice == QMessageBox.StandardButton.Save:
-                if not self.save_circuit_title():
-                    return
+                self.save_current_circuit(after_save=self.create_blank_circuit)
+                return
         self.create_blank_circuit()
 
     def create_blank_circuit(self, name=None, document=None):
@@ -1441,7 +1548,13 @@ class CircuitWindow(QMainWindow):
             while f"Untitled {number}" in names:
                 number += 1
             name = f"Untitled {number}"
+        self.viewing_saved_circuit = False
+        self.viewing_library_circuit = False
+        self.end_reference_build()
         self.circuit = None
+        self.build_reference_button.setEnabled(False)
+        self.circuit_mode_label.setText("Building from Scratch")
+        self.build_status_label.setText("Press the button on your board to upload your circuit, run safety checks, view its schematic, and theoretical values.")
         self.circuit_document = copy.deepcopy(document) if document is not None else {
             "schema_version": 1, "name": name, "ground_node": None, "components": [], "nets": []}
         self.saved_record_name = None
@@ -1487,7 +1600,7 @@ class CircuitWindow(QMainWindow):
         self.change_workspace_page(0)
         self.view_actions[1].setChecked(False)
         self.toggle_workspace_panel(1, False)
-        self.save_button.setEnabled(True)
+        self.update_save_availability()
         self.export_button.setEnabled(False)
         self.statusBar().clearMessage()
 
@@ -1567,7 +1680,86 @@ class CircuitWindow(QMainWindow):
         self.circuit_name.clearFocus()
         return True
 
+    def update_save_availability(self):
+        if not hasattr(self, "save_button"):
+            return
+        on_circuit = not hasattr(self, "content_pages") or self.content_pages.currentIndex() == 0
+        in_reference = getattr(self, "reference_document", None) is not None
+        allowed = not in_reference and not getattr(self, "viewing_library_circuit", False)
+        self.save_button.setEnabled(on_circuit and allowed)
+        if hasattr(self, "save_as_button"):
+            self.save_as_button.setEnabled(on_circuit)
+
+    def save_current_circuit(self, checked=False, after_save=None):
+        if self.reference_document is not None or getattr(self, "viewing_library_circuit", False):
+            if after_save is not None:
+                self.open_save_dialog(force_new=True, after_save=after_save)
+            return
+        if self.save_circuit_title() and after_save is not None:
+            after_save()
+
+    def open_save_dialog(self, checked=False, after_save=None, force_new=True):
+        for dialog_name in ("name_dialog", "save_dialog"):
+            existing = getattr(self, dialog_name, None)
+            if existing is not None:
+                existing.raise_()
+                existing.activateWindow()
+                return
+        reference_save = self.reference_document is not None
+        if reference_save and self.detected_build_document is None:
+            self.build_status_label.setText("Press the board button to upload a build before using Save As. The reference will remain unchanged.")
+            return
+        data = copy.deepcopy(self.detected_build_document) if reference_save else self.workspace_document()
+        try:
+            if self.database is None:
+                self.database = CircuitDatabase()
+            names = self.database.list_names(origin="user")
+        except (OSError, sqlite3.Error, ValueError) as error:
+            self.statusBar().showMessage(f"Could not open save: {error}", 6000)
+            return
+        previous_name = None if reference_save or force_new else self.saved_record_name
+        def writer(saved, previous, require_new):
+            try:
+                self.database.save_workspace(saved, previous_name=previous, require_new=require_new)
+            except sqlite3.Error as error:
+                raise RuntimeError(f"Could not save circuit: {error}") from error
+            if reference_save:
+                self.saved_uploaded_document = copy.deepcopy(data)
+            else:
+                if self.circuit is not None:
+                    self.circuit = replace(self.circuit, name=saved["name"])
+                self.circuit_document = copy.deepcopy(saved)
+                self.draft_circuit_name = saved["name"]
+                self.circuit_name.setText(saved["name"])
+                self.saved_record_name = saved["name"]
+                self.saved_document = copy.deepcopy(saved)
+                self.viewing_library_circuit = False
+                self.update_save_availability()
+            self.statusBar().showMessage(f'Saved “{saved["name"]}” to My Circuits.', 5000)
+            try:
+                self.refresh_my_circuits()
+            except (OSError, sqlite3.Error, ValueError):
+                pass  # A view refresh must not turn a committed save into a failed save.
+        dialog = SaveCircuitDialog(data, previous_name, names, writer, self)
+        if reference_save:
+            dialog.setWindowTitle("Save Uploaded Build As")
+            dialog.hint.setText("Save the uploaded build as a separate circuit in My Circuits. The reference stays unchanged.")
+        self.save_dialog = dialog
+        def closed(result):
+            self.save_dialog = None
+            dialog.deleteLater()
+            if result == QDialog.DialogCode.Accepted and after_save is not None:
+                after_save()
+        dialog.finished.connect(closed)
+        dialog.open()
+        dialog.name_field.setFocus()
+        dialog.name_field.selectAll()
+
     def save_circuit_title(self):
+        if self.reference_document is None and getattr(self, "viewing_library_circuit", False):
+            return False
+        if self.reference_document is not None:
+            return False
         data = self.workspace_document()
         if not data["name"]:
             self.rename_circuit_title()
@@ -1575,7 +1767,8 @@ class CircuitWindow(QMainWindow):
         try:
             if self.database is None:
                 self.database = CircuitDatabase()
-            self.database.save_workspace(data, previous_name=self.saved_record_name)
+            self.database.save_workspace(data, previous_name=self.saved_record_name,
+                                         require_new=self.saved_record_name is None)
         except (OSError, sqlite3.Error, ValueError) as error:
             message = f"Could not save circuit: {error}"
             self.circuit_name.setToolTip(message)
@@ -1585,7 +1778,10 @@ class CircuitWindow(QMainWindow):
         self.circuit_document = copy.deepcopy(data)
         self.saved_record_name = data["name"]
         self.saved_document = copy.deepcopy(data)
-        self.refresh_my_circuits()
+        try:
+            self.refresh_my_circuits()
+        except (OSError, sqlite3.Error, ValueError):
+            pass
         self.circuit_name.setToolTip("Saved; rename changes take effect in the database only when Save is clicked")
         self.statusBar().showMessage(f'Saved “{data["name"]}”.', 6000)
         return True
@@ -1602,6 +1798,9 @@ class CircuitWindow(QMainWindow):
             self.refresh_safety_status()
             return False
         document = copy.deepcopy(json.loads(data) if isinstance(data, (str, bytes)) else data)
+        self.viewing_saved_circuit = False
+        self.viewing_library_circuit = False
+        self.end_reference_build()
         if not circuit.components and not circuit.nets:
             self.create_blank_circuit(name=circuit.name, document=document)
             self.remember_saved_workspace(document)
@@ -1638,7 +1837,9 @@ class CircuitWindow(QMainWindow):
         self.statusBar().clearMessage()
         self.statusBar().setToolTip("V = V1 − V2. Current displays magnitude; arrows indicate conventional current direction.")
         self.circuit = circuit
-        self.save_button.setEnabled(True)
+        self.build_reference_button.setEnabled(bool(circuit.components))
+        self.build_reference_button.hide()
+        self.update_save_availability()
         self.export_button.setEnabled(self.content_pages.currentIndex() == 0)
         names = COMPONENT_NAMES
         types = {}
@@ -1951,6 +2152,7 @@ class CircuitWindow(QMainWindow):
             self.set_navigation_compact(not visible)
         dock = (self.status_dock, self.overview_dock)[index]
         dock.setVisible(visible and self.content_pages.currentIndex() == 0)
+        self.queue_panel_fit()
         if hasattr(self, "overview_toggle"):
             self.overview_toggle.reposition()
 
@@ -1964,10 +2166,29 @@ class CircuitWindow(QMainWindow):
         docks = (self.status_dock, self.overview_dock)
         for dock, wanted in zip(docks, self.panel_visibility):
             dock.setVisible(visible and wanted)
+        if visible:
+            self.queue_panel_fit()
+
+    def queue_panel_fit(self):
+        if getattr(self, "panel_fit_pending", False):
+            return
+        self.panel_fit_pending = True
+        QTimer.singleShot(0, self.fit_after_panel_change)
+
+    def fit_after_panel_change(self):
+        self.panel_fit_pending = False
+        if self.content_pages.currentIndex() != 0:
+            return
+        # Fit after Qt has applied the new dock and viewport geometry.
+        self.workspace.layout().activate()
+        self.content_pages.currentWidget().layout().activate()
+        self.schematic_frame.layout().activate()
+        self.canvas.fit_circuit()
 
     def change_workspace_page(self, index):
         self.set_workspace_panels(index == 0)
         self.content_pages.setCurrentIndex(index)
+        self.update_save_availability()
         self.export_button.setEnabled(index == 0 and self.circuit is not None)
         if index == 1:
             self.show_my_circuits()
@@ -2011,7 +2232,7 @@ class CircuitWindow(QMainWindow):
         if extra_issues is not None:
             self.request_issues = tuple(extra_issues)
         guard = self.power_protection
-        issues = tuple(self.safety_report.issues) + guard.runtime_issues + self.request_issues
+        issues = tuple(self.safety_report.issues) + guard.runtime_issues + tuple(i for i in self.request_issues if not i.code.startswith("reference_"))
         issues = tuple({(i.code, i.message): i for i in issues if i.code != "no_circuit"}.values())
         if issues or guard.transport is None or not self.topology_valid:
             self.power_granted = False
@@ -2035,21 +2256,27 @@ class CircuitWindow(QMainWindow):
             self.status_summary.setText(f"{errors} error{'s' if errors != 1 else ''} · {warnings} warning{'s' if warnings != 1 else ''}")
         else:
             self.status_summary.setText("Circuit checks passed" if checks_passed else "Waiting for a circuit")
-        key = (checks_passed, tuple((i.code, i.severity, i.message) for i in issues))
+        reference_blocked = bool(guard.reference_issues)
+        if reference_blocked:
+            self.power_granted = False
+        key = (checks_passed, reference_blocked, tuple((i.code, i.severity, i.message) for i in issues))
         if key != self.safety_alert_key:
             self.safety_alert_key = key
-            if issues or checks_passed:
-                self.safety_panel.set_issues(issues, checks_passed=checks_passed)
+            if issues or checks_passed or guard.reference_required:
+                self.safety_panel.set_issues(issues, checks_passed=checks_passed,
+                                             power_approved=checks_passed and not reference_blocked)
                 self.safety_panel.show()
             elif self.safety_panel is not None:
                 self.safety_panel.set_issues(())
-            if redraw and self.circuit is not None:
+            if redraw and self.circuit is not None and self.reference_document is None:
                 displayed = replace(self.circuit_with_measured_voltage(self.circuit),
                                     ground_node=self.simulation_result.ground_node)
                 render_circuit(self.scene, displayed, self.simulation_result, issues)
                 self.refresh_component_details()
 
     def inspect_safety_issue(self, issue):
+        if self.reference_document is not None:
+            return  # Detected-circuit faults must not mark the unchanged reference as faulty.
         if getattr(self, "selected_safety_issue", None) == issue:
             self.clear_component_selection()
             return
@@ -2095,7 +2322,10 @@ class CircuitWindow(QMainWindow):
         self.power_protection.disconnect()
         self.request_issues = ()
         self.hardware_topology_revision = None
-        if self.circuit is not None:
+        if self.reference_document is not None:
+            self.reassess_reference_build()
+            self.set_build_comparison_text("Disconnected", "Upload a fresh build after reconnecting.")
+        elif self.circuit is not None:
             self.display_circuit(self.circuit, preserve_view=True, measurement_update=True)
         self.refresh_safety_status()
 
@@ -2108,13 +2338,36 @@ class CircuitWindow(QMainWindow):
             self.hardware_topology_revision = None
             self.safety_report = SafetyReport((SafetyIssue("stale_topology", "Board topology revision is stale or invalid."),))
             self.power_protection.update_report(self.safety_report)
+            if self.reference_document is not None:
+                self.set_build_comparison_text("Upload Out of Date", "A fresh matching build is required.")
             self.refresh_safety_status()
             return False
+        if self.reference_document is not None:
+            try:
+                self.compare_detected_build(data, source="Board upload", revision=revision)
+            except (ValueError, KeyError, TypeError) as error:
+                self.detected_build_document = None
+                self.save_button.setEnabled(False)
+                self.safety_report = SafetyReport((SafetyIssue("invalid_topology", str(error)),))
+                self.power_protection.update_report(self.safety_report)
+                self.set_build_comparison_text("Invalid Upload", "No comparison is available.")
+                self.refresh_safety_status(redraw=False)
+                return False
+            return True
         return self.load_topology(data, hardware_revision=revision)
+
+    def reassess_reference_build(self):
+        if self.detected_build_document is None:
+            return
+        detected = self.circuit_with_measured_voltage(parse_topology(self.detected_build_document))
+        self.safety_report = assess_circuit(detected, self.safety_limits, solve_dc(detected))
+        self.power_protection.update_report(self.safety_report, topology_changed=False)
 
     def handle_enable_request(self, request_id, topology_revision):
         """Validate the latest board snapshot and reply; firmware decides whether to power it."""
-        if self.circuit is not None:
+        if self.reference_document is not None:
+            self.reassess_reference_build()
+        elif self.circuit is not None:
             self.display_circuit(self.circuit, preserve_view=True, measurement_update=True)
         decision = self.power_protection.handle_enable_request(request_id, topology_revision)
         self.power_granted = decision.granted
@@ -2129,7 +2382,9 @@ class CircuitWindow(QMainWindow):
         if guard.transport is None:
             return False
         valid = guard.observe(voltage_v, current_a)
-        if self.circuit is not None and guard.voltage_v is not None:
+        if self.reference_document is not None:
+            self.reassess_reference_build()
+        elif self.circuit is not None and guard.voltage_v is not None:
             self.display_circuit(self.circuit, preserve_view=True, measurement_update=True)
         self.refresh_safety_status()
         return valid
@@ -2327,6 +2582,102 @@ class CircuitWindow(QMainWindow):
         if not QDesktopServices.openUrl(QUrl(url)):
             self.statusBar().showMessage("Could not open the browser. Use falstad.py --output to save circuit text.")
 
+    def start_reference_build(self):
+        if self.circuit is None or not self.circuit.components:
+            return
+        self.reference_document = copy.deepcopy(self.workspace_document())
+        self.detected_build_document = None
+        self.saved_uploaded_document = None
+        self.power_protection.set_reference_required(True)
+        self.save_button.setEnabled(False)
+        self.topology_valid = False
+        self.safety_report = SafetyReport((SafetyIssue("no_circuit", "Waiting for an uploaded build."),))
+        self.power_protection.update_report(self.safety_report, topology_changed=True)
+        self.power_granted = False
+        self.request_issues = ()
+        self.build_comparison_card.show()
+        self.set_build_comparison_text("Waiting for Circuit Upload", "Press the board button to upload your build.")
+        self.refresh_safety_status(redraw=False)
+        self.circuit_mode_label.setText("Building from Reference")
+        self.circuit_mode_label.hide()
+        self.reference_title_label.show()
+        self.build_toolbar.layout().setContentsMargins(12, 10, 12, 10)
+        self.reference_title_label.setText("Building from Reference: " + self.reference_document["name"])
+        self.build_toolbar.show()
+        self.build_status_label.show()
+        self.build_status_label.setText("Press the button on your board to upload your build, compare it with this reference, run safety checks, and view theoretical values.")
+        self.build_reference_button.hide()
+        self.end_build_button.show()
+        self.exit_reference_description.show()
+
+    def end_reference_build(self):
+        was_reference = self.reference_document is not None
+        self.reference_document = None
+        self.detected_build_document = None
+        self.power_protection.set_reference_required(False)
+        if hasattr(self, "save_button"):
+            self.update_save_availability()
+        if hasattr(self, "build_comparison_card"):
+            self.build_comparison_card.hide()
+        if was_reference:
+            self.power_granted = False
+            self.request_issues = ()
+            if self.circuit is not None:
+                self.topology_valid = True
+                self.safety_report = assess_circuit(self.circuit, self.safety_limits, solve_dc(self.circuit))
+            self.power_protection.update_report(self.safety_report, topology_changed=True)
+            self.refresh_safety_status(redraw=False)
+        if not hasattr(self, "build_reference_button"):
+            return
+        self.circuit_mode_label.setText("Viewing Saved Circuit" if self.viewing_saved_circuit else "Building from Scratch")
+        self.circuit_mode_label.hide()
+        self.build_toolbar.show()
+        self.reference_title_label.setText("Viewing Circuit" if self.viewing_saved_circuit else "Building from Scratch")
+        self.reference_title_label.show()
+        self.build_toolbar.layout().setContentsMargins(12, 8, 12, 8)
+        self.build_status_label.setText("Select Build Circuit to recreate this circuit on your board and compare your uploaded build against it." if self.viewing_saved_circuit else "Press the button on your board to upload your circuit, run safety checks, view its schematic, and theoretical values.")
+        self.build_status_label.show()
+        self.build_reference_button.setVisible(self.viewing_saved_circuit and self.circuit is not None and bool(self.circuit.components))
+        self.end_build_button.hide()
+        self.exit_reference_description.hide()
+
+    def set_build_comparison_text(self, heading, details, colour="#666666"):
+        self.build_comparison_heading.setText(heading)
+        self.build_comparison_heading.setStyleSheet(f"font-family: 'DM Sans'; font-size: 14px; font-weight: 600; color: {colour}; background: transparent;")
+        self.build_comparison_label.setText(details)
+
+    def compare_detected_build(self, document, source="JSON snapshot", revision=None):
+        if self.reference_document is None:
+            raise ValueError("Choose a reference before checking a build.")
+        document = json.loads(document) if isinstance(document, (str, bytes)) else document
+        detected = parse_topology(document)
+        result = compare_build(self.reference_document, document)
+        self.detected_build_document = copy.deepcopy(document)
+        self.update_save_availability()
+        self.topology_valid = True
+        analysis = self.circuit_with_measured_voltage(detected)
+        self.safety_report = assess_circuit(analysis, self.safety_limits, solve_dc(analysis))
+        self.power_protection.update_report(self.safety_report, topology_changed=True, revision=revision)
+        self.power_protection.record_reference_match(revision, result.status)
+        self.hardware_topology_revision = self.power_protection.topology_revision
+        self.request_issues = ()
+        heading = {"matched": "Matches Reference", "different": "Does Not Match", "inconclusive": "Comparison Inconclusive"}[result.status]
+        colour = "#51843c" if result.status == "matched" else "#947119"
+        self.set_build_comparison_text(heading, "\n".join(result.messages), colour)
+        self.build_status_label.setText("Your reference stays unchanged. Results for the uploaded build appear in Circuit Status.")
+        self.refresh_safety_status(redraw=False)
+        return result
+
+    def build_library_reference(self, name):
+        self.open_library_circuit(name)
+        if self.content_pages.currentIndex() == 0 and self.circuit is not None and self.circuit.name == name:
+            self.start_reference_build()
+
+    def build_saved_reference(self, name):
+        self.open_saved_circuit(name)
+        if self.content_pages.currentIndex() == 0 and self.circuit is not None and self.circuit.name == name:
+            self.start_reference_build()
+
     def bundled_circuits(self):
         return [json.loads(path.read_bytes()) for path in sorted(
             (Path(__file__).resolve().parent / "examples").rglob("*.json"))]
@@ -2342,6 +2693,7 @@ class CircuitWindow(QMainWindow):
         self.navigation_buttons[2].setChecked(True)
         self.set_workspace_panels(False)
         self.content_pages.setCurrentIndex(2)
+        self.update_save_availability()
         self.export_button.setEnabled(False)
 
     def refresh_my_circuits(self):
@@ -2359,6 +2711,7 @@ class CircuitWindow(QMainWindow):
         self.navigation_buttons[1].setChecked(True)
         self.set_workspace_panels(False)
         self.content_pages.setCurrentIndex(1)
+        self.update_save_availability()
         self.export_button.setEnabled(False)
 
     def open_library_circuit(self, name):
@@ -2372,6 +2725,9 @@ class CircuitWindow(QMainWindow):
             # An example is a clean read-only baseline, never a personal record identity.
             self.saved_record_name = None
             self.saved_document = copy.deepcopy(data)
+            self.viewing_saved_circuit = True
+            self.viewing_library_circuit = True
+            self.end_reference_build()
             self.navigation_buttons[0].setChecked(True)
             self.change_workspace_page(0)
 
@@ -2385,6 +2741,8 @@ class CircuitWindow(QMainWindow):
             return
         self.clear_component_selection()
         if self.load_topology(data):
+            self.viewing_saved_circuit = True
+            self.end_reference_build()
             self.navigation_buttons[0].setChecked(True)
             self.change_workspace_page(0)
 

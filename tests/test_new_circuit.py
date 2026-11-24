@@ -10,6 +10,15 @@ from database import CircuitDatabase
 from main import CircuitWindow
 ROOT=Path(__file__).resolve().parents[1]
 
+def confirm_save(window):
+    from PySide6.QtWidgets import QDialogButtonBox
+    window.save_button.click()
+    dialog = getattr(window, 'save_dialog', None)
+    if dialog is not None:
+        dialog.primary_button.click()
+    assert getattr(window, 'save_dialog', None) is None
+
+
 class NewCircuitTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
@@ -54,6 +63,7 @@ class NewCircuitTests(unittest.TestCase):
         w=self.window;w.load_topology(self.data)
         w.circuit_name.setText('My RC circuit');w.rename_circuit_title()
         with patch('main.QMessageBox.question',return_value=QMessageBox.StandardButton.Save):w.new_circuit()
+        self.assertIsNone(getattr(w,'save_dialog',None))
         self.assertIsNone(w.circuit)
         self.assertEqual(self.db.load('My RC circuit')['components'],self.data['components'])
         w.load_topology(self.data)
@@ -62,8 +72,10 @@ class NewCircuitTests(unittest.TestCase):
 
     def test_failed_save_keeps_current_circuit(self):
         w=self.window;w.load_topology(self.data);before=w.circuit
-        with patch('main.QMessageBox.question',return_value=QMessageBox.StandardButton.Save), patch.object(w,'save_circuit_title',return_value=False):w.new_circuit()
+        with patch('main.QMessageBox.question',return_value=QMessageBox.StandardButton.Save), patch.object(self.db,'save_workspace',side_effect=OSError('Write failed')):
+            w.new_circuit()
         self.assertIs(w.circuit,before)
+        self.assertIsNone(getattr(w,'save_dialog',None))
         self.assertEqual(self.db.list_names(),[])
 
     def test_saved_record_does_not_prompt_for_view_changes(self):
@@ -107,7 +119,7 @@ class NewCircuitTests(unittest.TestCase):
         self.assertTrue(w.has_unsaved_circuit())
         with patch('main.QMessageBox.question',return_value=QMessageBox.StandardButton.Cancel):w.new_circuit()
         self.assertEqual(w.circuit_name.text(),'Draft')
-        w.save_button.click()
+        confirm_save(w)
         self.assertFalse(w.has_unsaved_circuit())
         with patch('main.QMessageBox.question') as prompt:w.new_circuit();prompt.assert_not_called()
         self.assertEqual(self.db.load('Draft')['components'],[])

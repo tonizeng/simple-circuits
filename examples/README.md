@@ -98,3 +98,4 @@ Example 08 supports a local first-order RL time preview: τ = 100 µs for
 select L1 for timing and plots. Example 13 also supports an analytical series-RLC time preview.
 - 2026-11-16 — changed ui
 - 2026-11-23 — modernize ui
+- 2026-11-23 — add building from scrach + reference

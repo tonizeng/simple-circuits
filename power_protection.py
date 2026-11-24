@@ -26,6 +26,8 @@ class PowerProtection:
         self.clock = clock
         self.timeout_s = timeout_s
         self.transport = None
+        self.reference_match_revision = None
+        self.reference_match_status = None
         self.report = None
         self.topology_revision = None
         self.highest_revision = -1
@@ -37,6 +39,9 @@ class PowerProtection:
         self.link_issue = None
         self.last_decision = None
         self.seen_requests = set()
+        self.reference_required = False
+        self.reference_match_revision = None
+        self.reference_match_status = None
 
     def attach_transport(self, sender):
         if not callable(sender):
@@ -52,9 +57,13 @@ class PowerProtection:
         self.measurement_issue = self.firmware_fault = self.link_issue = None
         self.last_decision = None
         self.seen_requests.clear()
+        self.reference_match_revision = None
+        self.reference_match_status = None
 
     def disconnect(self):
         self.transport = None
+        self.reference_match_revision = None
+        self.reference_match_status = None
         self.report = None
         self.topology_revision = None
         self.last_sample = None
@@ -64,12 +73,36 @@ class PowerProtection:
     def update_report(self, report, topology_changed=True, revision=None):
         self.report = report
         if topology_changed:
+            self.reference_match_revision = None
+            self.reference_match_status = None
             self.last_decision = None
             self.topology_revision = None
             if self.transport is not None and type(revision) is int and revision > self.highest_revision:
                 self.highest_revision = revision
                 self.topology_revision = revision
         # Measurement-only reassessment must not turn a library circuit into board data.
+
+    def set_reference_required(self, required):
+        self.reference_required = bool(required)
+        self.reference_match_revision = None
+        self.reference_match_status = None
+        self.last_decision = None
+
+    def record_reference_match(self, revision, status):
+        self.reference_match_status = status
+        self.reference_match_revision = revision if type(revision) is int and revision == self.topology_revision else None
+        self.last_decision = None
+
+    @property
+    def reference_issues(self):
+        if not self.reference_required:
+            return ()
+        if (self.reference_match_status == "matched" and self.topology_revision is not None
+                and self.reference_match_revision == self.topology_revision):
+            return ()
+        message = ("The uploaded build does not match the reference." if self.reference_match_status == "different"
+                   else "A matching reference check is required for the current board topology.")
+        return (SafetyIssue("reference_mismatch" if self.reference_match_status == "different" else "reference_unchecked", message),)
 
     @property
     def measurements_fresh(self):
@@ -128,6 +161,7 @@ class PowerProtection:
         if not self.measurements_fresh:
             issues.append(SafetyIssue('missing_telemetry', 'Fresh battery voltage and load-current readings are required.', severity='warning'))
         issues.extend(self.runtime_issues)
+        issues.extend(self.reference_issues)
         decision = PowerDecision(request_id, topology_revision, not issues, tuple(issues),
                                  self.limits.max_voltage_v, self.limits.max_current_a)
         if self.transport is not None:

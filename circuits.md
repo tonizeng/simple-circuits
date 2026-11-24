@@ -806,3 +806,36 @@ marked example and hidden from My Circuits; customized records remain user. No
 records are deleted by classification. Previously saved exact stock copies are
 indistinguishable from auto-imports in the old schema; Save explicitly promotes a
 copy to user origin. New saves always have user origin.
+
+
+## Reference build preview
+
+- Both My Circuits and Circuit Library offer **Build This Circuit**; viewing a saved circuit also offers a compact **Build Circuit** action beside its mode label. Exiting reference mode returns to viewing that saved circuit.
+- A compact label below the circuit title shows **Building from Scratch**, **Viewing Saved Circuit**, or **Building from Reference**. The full comparison banner appears only during reference building. No live/connected state is claimed without firmware.
+- Uploads are initiated by the physical board button, not an app check/upload button. Firmware integration is pending; the internal comparison entry point can be exercised in tests with JSON snapshots. Comparison never replaces the reference, writes a save, or grants power.
+- Comparison ignores circuit/component/node names and layout; checks required nominal parameters, contact states, connections and polarized-terminal orientation. Nonpolar two-terminal components may be reversed.
+- This is bounded structural matching, not general electrical equivalence: explicit wires must be represented consistently. Additional series wires or equivalent resistor substitutions are not reduced. Ambiguous/large searches may return **Comparison Inconclusive**.
+- Only component count/type/value/state and generic connection/polarity differences are reported for now; exact missing-wire localization and a separate detected-circuit view remain future work.
+- Future firmware integration must check a fresh, revision-bound detected snapshot. Matching a reference is separate from safety approval and physical power enablement.
+
+
+### Reference-mode approval rule
+
+- Circuit Status shows **Safety Checks** first and **Build Comparison** below it only during reference building.
+- Reference-mode power approval requires both passing safety checks on the uploaded circuit and a structural match for that exact board topology revision. Pending, differing, inconclusive, invalid or stale comparisons deny approval.
+- Snapshot comparisons invoked without a board revision cannot authorize firmware. A new topology, reconnect, reference change or exit invalidates previous approval.
+- The reference schematic remains unchanged; safety checks and comparison use the detected snapshot. Detected faults are not highlighted on the reference schematic.
+- Scratch mode retains safety-only approval. Firmware remains responsible for physical power enablement and shutdown; serial integration is still pending.
+
+
+## Save workflow
+
+- Save opens a naming dialog; Cancel leaves the workspace and database unchanged. Pencil renaming stays in memory until Save.
+- New/empty circuits save new personal records. While viewing a Circuit Library example, Save is disabled and Save As creates a personal copy. Library example files are never overwritten.
+- The header has separate **Save** and **Save As…** actions. Save writes the current name immediately, including the first save of an Untitled circuit; it never opens a naming dialog. Use the pencil to rename, then Save. Errors remain in the workspace without a dialog. Save As always opens a name dialog and creates a separate record. Naming dialogs have only Save and Cancel.
+- In reference mode, Save is disabled. Save As always targets the uploaded build as a new personal circuit, never the displayed reference. Before an upload exists, Save As explains that a board upload is required and saves nothing. An unsaved uploaded snapshot prompts before New Circuit.
+- Names must be nonempty and contain no control characters; existing personal names cannot be used for a new record. Save as New enforces this again inside the SQLite transaction.
+- Database write failure keeps the dialog/workspace intact and offers Retry Save or Cancel. Success refreshes My Circuits and displays confirmation.
+- Saving is independent of safety approval: incomplete or unsafe circuit drafts can still be stored, without granting power.
+
+- Save As validates names as the user types against cached personal names: empty, control-character and duplicate names disable Save and show an inline message. An available name clears the message and enables Save. SQLite rechecks uniqueness transactionally at the final write.
