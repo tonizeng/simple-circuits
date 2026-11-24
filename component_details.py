@@ -96,6 +96,7 @@ class ComponentDetailsPanel(QFrame):
     panel_close_requested = Signal()
     clear_requested = Signal()
     node_requested = Signal(str)
+    solving_guide_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -511,6 +512,13 @@ class ComponentDetailsPanel(QFrame):
             purpose = text_label(COMPONENT_DESCRIPTIONS[component.type], content)
             purpose.setContentsMargins(0, 0, 0, 8)
             self.disclosure(column, "Purpose", purpose, (component.id, "purpose"))
+            solving_link = QPushButton("View Formulas in Guide →", content)
+            solving_link.setObjectName("solvingGuideLink")
+            solving_link.setCursor(Qt.CursorShape.PointingHandCursor)
+            solving_link.setAccessibleName("View formulas in Guide for " + COMPONENT_NAMES[component.type])
+            solving_link.setStyleSheet("QPushButton { background: transparent; color: #42447a; border: none; text-align: left; font-family: 'DM Sans'; font-size: 14px; padding: 0; } QPushButton:hover { text-decoration: underline; }")
+            solving_link.clicked.connect(lambda checked=False, kind=component.type: self.solving_guide_requested.emit(kind))
+            column.addWidget(solving_link)
             mixed_storage = self.overview_circuit and {"capacitor", "inductor"}.issubset({c.type for c in self.overview_circuit.components})
             if component.type in ("capacitor", "inductor") and mixed_storage:
                 divider()

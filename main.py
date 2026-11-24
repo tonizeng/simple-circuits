@@ -1167,9 +1167,10 @@ class CircuitWindow(QMainWindow):
         circuit_page.setLayout(schematic_area)
         self.content_pages = QStackedWidget()
         self.content_pages.addWidget(circuit_page)
-        self.my_circuits_page = CircuitLibraryPage(title="My Circuits", empty_message="No saved circuits yet. Use Save to keep your current circuit here.")
+        self.my_circuits_page = CircuitLibraryPage(title="My Circuits", validate_builds=True, empty_message="No saved circuits yet. Use Save to keep your current circuit here.")
         self.my_circuits_page.circuit_requested.connect(self.open_saved_circuit)
         self.my_circuits_page.build_requested.connect(self.build_saved_reference)
+        self.my_circuits_page.delete_requested.connect(self.delete_saved_circuit)
         self.content_pages.addWidget(self.my_circuits_page)
         self.library_page = CircuitLibraryPage()
         self.library_page.circuit_requested.connect(self.open_library_circuit)
@@ -1184,6 +1185,7 @@ class CircuitWindow(QMainWindow):
         self.component_details.current_display = self.current_display
         self.component_details.component_list = self.component_legend
         self.component_details.node_requested.connect(self.select_node_details)
+        self.component_details.solving_guide_requested.connect(self.show_solving_guide)
         self.canvas.component_clicked.connect(self.select_component_details)
         self.canvas.node_clicked.connect(self.select_node_details)
         self.canvas.selection_cleared.connect(self.clear_component_selection)
@@ -2408,6 +2410,10 @@ class CircuitWindow(QMainWindow):
         button.style().polish(button)
         button.update()
 
+    def show_solving_guide(self, component_type):
+        self.show_guide()
+        self.guide_dialog.show_formulas(component_type)
+
     def show_guide(self):
         existing = getattr(self, "guide_dialog", None)
         if existing is not None:
@@ -2695,6 +2701,22 @@ class CircuitWindow(QMainWindow):
         self.content_pages.setCurrentIndex(2)
         self.update_save_availability()
         self.export_button.setEnabled(False)
+
+    def delete_saved_circuit(self, name):
+        answer = QMessageBox.question(self, "Delete Circuit", f'Are you sure you want to delete “{name}” from My Circuits?',
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.database.delete_user_circuit(name)
+            if self.saved_record_name == name:
+                self.saved_record_name = None
+                self.saved_document = None
+            self.refresh_my_circuits()
+            self.statusBar().showMessage("Circuit deleted.", 4000)
+        except (OSError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "Cannot Delete Circuit", str(error))
 
     def refresh_my_circuits(self):
         if self.database is None:

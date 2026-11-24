@@ -99,6 +99,11 @@ class CircuitDatabase:
                 connection.execute("DELETE FROM circuits WHERE name = ?", (previous_name,))
         return name
 
+    def delete_user_circuit(self, name):
+        """Delete only a personal circuit, leaving bundled/legacy records alone."""
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("DELETE FROM circuits WHERE name = ? AND origin = 'user'", (name,))
+
     def load(self, name):
         with sqlite3.connect(self.path) as connection:
             row = connection.execute(

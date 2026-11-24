@@ -99,3 +99,4 @@ select L1 for timing and plots. Example 13 also supports an analytical series-RL
 - 2026-11-16 — changed ui
 - 2026-11-23 — modernize ui
 - 2026-11-23 — add building from scrach + reference
+- 2026-11-23 — update guide
